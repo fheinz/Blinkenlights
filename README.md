@@ -23,7 +23,9 @@ board may report. It also doesn't have any ability to talk to a server (which
 isn't in place yet anyway).
 
 The web app code is heavily based on [the webserial
-codelab](https://goo.gle/web-serial-codelab)
+codelab](https://goo.gle/web-serial-codelab), and the sample pixel art is based
+on [henrysoftware](https://henrysoftware.itch.io/)'s [free pixel
+food](https://henrysoftware.itch.io/pixel-food) collection.
 
 ## License
 
