@@ -15,7 +15,9 @@
  * RGB LEDs Matrix Animation Frame 
  *
  */
-#include <avr/pgmspace.h>  // Needed to store stuff in Flash using PROGMEM
+
+// Use the I2S driver because the default RMT driver doesn't support inverting output.
+#define FASTLED_ESP32_I2S true
 #include "FastLED.h"       // Fastled library to control the LEDs
 
 #define NUM_COLS 16
@@ -23,7 +25,8 @@
 #define NUM_LEDS (NUM_COLS * NUM_LINES)
 #define MAX_FRAMES 32
 
-#define DATA_PIN 1
+// #define DATA_PIN 1
+#define DATA_PIN 27
 
 /*
  * Animation frames
@@ -161,7 +164,6 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
       FastLED.addLeds<NEOPIXEL, pin>(leds, matrixSize);
       FastLED.setBrightness(15);
       FastLED.setDither(BINARY_DITHER);
-      clear();
     }
 
     void clear() {
@@ -630,7 +632,7 @@ void ProcessCommand() {
 }
 
 void SerialInit() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println(F("Startup!"));
   BufP = InputBuffer;
   LineTooLong = false;
@@ -641,7 +643,7 @@ void SerialInit() {
 
 void SerialUpdate() {
   if (Serial) {
-    while (Serial.available() > 0) {
+    while (Serial.available()) {
       int c = Serial.read();
       if (c == '\n') {
         if (BufP != InputBuffer) {
@@ -662,6 +664,8 @@ void SerialUpdate() {
  * And the usual Arduino song and dance.
  */
 void setup() {
+  GPIO.func_out_sel_cfg[DATA_PIN].inv_sel = 1;
+  Display.clear();
   FramesReset();
   AnimationsReset();
   SerialInit();
