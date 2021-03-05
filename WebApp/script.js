@@ -38,6 +38,12 @@ const canvas = new OffscreenCanvas(16,16); // document.getElementById('myCanvas'
 const pixelArt = document.querySelectorAll('img.pixelArt');
 const gammaSlider = document.getElementById('gammaSlider');
 const gammaDisplay = document.getElementById('gammaDisplay');
+const redCCSlider = document.getElementById('redCCSlider');
+const redCCDisplay = document.getElementById('redCCDisplay');
+const blueCCSlider = document.getElementById('blueCCSlider');
+const blueCCDisplay = document.getElementById('blueCCDisplay');
+const greenCCSlider = document.getElementById('greenCCSlider');
+const greenCCDisplay = document.getElementById('greenCCDisplay');
 const debugButton = document.getElementById('debugButton');
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -60,12 +66,13 @@ document.addEventListener('DOMContentLoaded', () => {
 async function connect() {
   port = await navigator.serial.requestPort();
   // - Wait for the port to open.
-  await port.open({ baudRate: 9600 });
+  await port.open({ baudRate: 115200 });
 
   const encoder = new TextEncoderStream();
   outputDone = encoder.readable.pipeTo(port.writable);
   outputStream = encoder.writable;
   writeToStream('', 'RST', 'VER');
+  updateColorCorrection();
 
   let decoder = new TextDecoderStream();
   inputDone = port.readable.pipeTo(decoder.writable);
@@ -145,7 +152,7 @@ function sendGrid() {
   var i = 0;
   var px = [];
   ledCBs.forEach((cb) => {
-    px.push(cb.checked ? 'FF0000' : '000000');
+    px.push(cb.checked ? 'FFFFFF' : '000000');
     if (++i % COLS == 0 ) {
       writeToStream('RGB ' + px.join(''));
       px = [];
@@ -162,7 +169,7 @@ function sendImage(img) {
   var ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0);
   var bitmap = ctx.getImageData(0, 0, COLS, ROWS).data;
-  
+
   writeToStream('ANM 600000', 'FRM 1000');
   for (var r = 0; r < ROWS; r++) {
     var pix = [];
@@ -237,6 +244,10 @@ function updateGammaDisplay() {
   gammaDisplay.innerHTML = gammaSlider.value/100.0;
 }
 
+function updateSliderDisplay(slider, display) {
+  display.innerHTML = slider.value/100.0;
+}
+
 function updateGamma() {
   var invGamma = 100.0/gammaSlider.value;
   let i = 0;
@@ -246,10 +257,35 @@ function updateGamma() {
   }
 }
 
+function updateColorCorrection() {
+  writeToStream('CLC ' + (
+      (Math.round(2.55*redCCSlider.value)).toString(16).padStart('0', 2) +
+	(Math.round(2.55*greenCCSlider.value)).toString(16).padStart('0', 2) +
+	(Math.round(2.55*blueCCSlider.value)).toString(16).padStart('0', 2)).
+		toUpperCase());
+}
+
 function initGamma() {
-  gammaSlider.oninput = updateGammaDisplay;
+  gammaSlider.oninput = function () {
+    updateSliderDisplay(gammaSlider, gammaDisplay);
+  };
+  gammaSlider.oninput();
+  redCCSlider.oninput = function () {
+    updateSliderDisplay(redCCSlider, redCCDisplay);
+  };
+  redCCSlider.oninput();
+  greenCCSlider.oninput = function () {
+    updateSliderDisplay(greenCCSlider, greenCCDisplay);
+  };
+  greenCCSlider.oninput();
+  blueCCSlider.oninput = function () {
+    updateSliderDisplay(blueCCSlider, blueCCDisplay);
+  };
+  blueCCSlider.oninput();
   gammaSlider.onchange = updateGamma;
-  updateGammaDisplay();
+  redCCSlider.onchange = updateColorCorrection;
+  greenCCSlider.onchange = updateColorCorrection;
+  blueCCSlider.onchange = updateColorCorrection;
   updateGamma();
 }
 
