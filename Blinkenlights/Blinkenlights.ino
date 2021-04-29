@@ -20,13 +20,21 @@
 #define FASTLED_ESP32_I2S true
 #include "FastLED.h"       // Fastled library to control the LEDs
 
-#define NUM_COLS 16
-#define NUM_LINES 16
-#define NUM_LEDS (NUM_COLS * NUM_LINES)
-#define MAX_FRAMES 32
+// Pin definitions
+constexpr int kOnboardLed0Pin = 32;
+constexpr int kOnboardLed1Pin = 33;
+constexpr int kLedMatrixPowerPin = 12;
+constexpr int kLedMatrixDataPin = 27;
+constexpr int kUsbCc1Pin = 36;
+constexpr int kUsbCc2Pin = 39;
 
-// #define DATA_PIN 1
-#define DATA_PIN 27
+// LED Matrix dimensions
+constexpr int kLedMatrixNumCols = 16;
+constexpr int kLedMatrixNumLines = 16;
+constexpr int kLedMatrixNumLeds = kLedMatrixNumCols * kLedMatrixNumLines;
+
+// 
+constexpr int kMaxNumFrames = 32;
 
 /*
  * Animation frames
@@ -38,11 +46,11 @@
 typedef uint8_t FrameIndex;
 typedef uint32_t Duration;
 typedef struct {
-  uint8_t pixels[NUM_LEDS*3];
+  uint8_t pixels[kLedMatrixNumLeds*3];
   Duration duration;
   FrameIndex next;
 } AnimationFrame;
-#define FRAMES_SENTINEL ((FrameIndex)255)
+constexpr FrameIndex kFramesSentinel = 255;
 
 /*
  * Animations
@@ -59,7 +67,7 @@ typedef struct {
   FrameIndex frames;
   AnimationIndex next;
 } Animation;
-#define ANIMATIONS_SENTINEL ((AnimationIndex)255)
+constexpr AnimationIndex kAnimationsSentinel = 255;
 
 /*
  * Called on violation of invariants. May be used for desperate
@@ -72,20 +80,21 @@ typedef struct {
  *    to:   end of the string representation 
  */
 
-#define ERROR_INVALID_FRAME_INDEX             1
-#define ERROR_INVALID_ANIMATION_INDEX         2
-#define ERROR_ENQUEUE_INVALID_ANIMATION       3
-#define ERROR_ADD_FRAME_TO_INVALID_ANIMATION  4
-#define ERROR_ADD_INVALID_FRAME_TO_ANIMATION  5
-void CantHappen(const int err) {}
+enum class ErrorCode {
+     kInvalidFrameIndex,
+     kEnqueueInvalidAnimation,
+     kAddFrameToInvalidAnimation,
+     kAddInvalidFrameToAnimation,
+};
+void CantHappen(const ErrorCode err) {}
 
 
 /*
  * String --> integer parsing utility functions
  */
 
-#define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
-#define ISHEXDIGIT(c) ((c) >= 'A' && (c) <= 'F')
+inline bool isdigit(char c) { return c >= '0' && c <= '9'; }
+inline bool ishexdigit(char c) { return c >= 'A' && c <= 'F'; }
 
 /*
  * Parse a substring into an unsigned int 32 using decimal
@@ -103,7 +112,7 @@ bool ParseUInt32(uint32_t *i, const char *from, const char *to) {
   uint32_t acc = 0;
   while (from < to){
     char c = *from++;
-    if (!ISDIGIT(c))
+    if (!isdigit(c))
       return false;
     acc = acc * 10 + (c - '0');
   }
@@ -129,9 +138,9 @@ bool ParseHex(uint8_t *buf, const char *from, const char *to) {
   while (from < to) {
     char c = *from++;
     uint8_t d;
-    if (ISDIGIT(c)) {
+    if (isdigit(c)) {
       d = c -'0';
-    } else if (ISHEXDIGIT(c)) {
+    } else if (ishexdigit(c)) {
       d = (c + 10 - 'A');
     } else {
       return false;
@@ -174,9 +183,9 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
     void show(const AnimationFrame &f) {
       const uint8_t *pixels = f.pixels;
       FastLED.clear();
-      for (int line = 0; line < NUM_LINES; line++) {
-        for (int col = 0; col < NUM_COLS; col++) {
-          int tgt_index = line * NUM_COLS + (line % 2 ? col : (NUM_COLS - 1) - col);
+      for (int line = 0; line < kLedMatrixNumLines; line++) {
+        for (int col = 0; col < kLedMatrixNumCols; col++) {
+          int tgt_index = line * kLedMatrixNumCols + (line % 2 ? col : (kLedMatrixNumCols - 1) - col);
           leds[tgt_index] = CRGB(pixels[0], pixels[1], pixels[2]);  
           pixels += 3;
         }
@@ -186,38 +195,38 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
 };
 
 
-LedMatrix<NUM_LEDS, DATA_PIN> Display;
+LedMatrix<kLedMatrixNumLeds, kLedMatrixDataPin> Display;
 
 /*
  * The frames pool.
  */
-AnimationFrame Frames[MAX_FRAMES];
+AnimationFrame Frames[kMaxNumFrames];
 FrameIndex FreeFrames;
 uint8_t NumFreeFrames;
 
 void FramesReset() {
-    for (int i = 0; i < MAX_FRAMES-1; i++) {
+    for (int i = 0; i < kMaxNumFrames-1; i++) {
     Frames[i].next = i+1;
   }
-  Frames[MAX_FRAMES-1].next = FRAMES_SENTINEL;
+  Frames[kMaxNumFrames-1].next = kFramesSentinel;
   FreeFrames = (FrameIndex)0;
-  NumFreeFrames = MAX_FRAMES;
+  NumFreeFrames = kMaxNumFrames;
 }
 
 FrameIndex FramesGetFrame() {
   FrameIndex f = FreeFrames;
-  if (f != FRAMES_SENTINEL) {
+  if (f != kFramesSentinel) {
     FreeFrames = Frames[f].next;
-    Frames[f].next = FRAMES_SENTINEL;
+    Frames[f].next = kFramesSentinel;
     NumFreeFrames--;
   }
   return f;
 }
 
 void FramesFreeFrames(FrameIndex f) {
-  while (f != FRAMES_SENTINEL) {
-    if (f >= MAX_FRAMES) {
-      CantHappen(ERROR_INVALID_FRAME_INDEX);
+  while (f != kFramesSentinel) {
+    if (f >= kMaxNumFrames) {
+      CantHappen(ErrorCode::kInvalidFrameIndex);
     }
     FrameIndex n = Frames[f].next;
     Frames[f].next = FreeFrames;
@@ -230,7 +239,7 @@ void FramesFreeFrames(FrameIndex f) {
 int FramesCountFrames(FrameIndex f) {
   int count = 0;
   
-  while (f != FRAMES_SENTINEL) {
+  while (f != kFramesSentinel) {
     count++;
     f = Frames[f].next;
   }
@@ -251,32 +260,32 @@ void AnimationsReset() {
   for (int i = 0; i < MAX_ANIMATIONS-1; i++) {
     Animations[i].next = i+1;
   }
-  Animations[MAX_ANIMATIONS-1].next = ANIMATIONS_SENTINEL;
+  Animations[MAX_ANIMATIONS-1].next = kAnimationsSentinel;
   FreeAnimations = (AnimationIndex)0;
-  LiveAnimations = ANIMATIONS_SENTINEL;
+  LiveAnimations = kAnimationsSentinel;
   NumFreeAnimations = MAX_ANIMATIONS;
   NumLiveAnimations = 0;
 }
 
 AnimationIndex AnimationsGetAnimation() {
   AnimationIndex a = FreeAnimations;
-  if (a != ANIMATIONS_SENTINEL) {
+  if (a != kAnimationsSentinel) {
     FreeAnimations = Animations[a].next;
     NumFreeAnimations--;
     Animations[a].duration = 0;
-    Animations[a].frames = FRAMES_SENTINEL;
-    Animations[a].next = ANIMATIONS_SENTINEL;
+    Animations[a].frames = kFramesSentinel;
+    Animations[a].next = kAnimationsSentinel;
   }
   return a;
 }
 
 void AnimationsFreeAnimation(AnimationIndex a) {
-  while (a != ANIMATIONS_SENTINEL) {
+  while (a != kAnimationsSentinel) {
     if (a >= MAX_ANIMATIONS) {
-      CantHappen(ERROR_INVALID_ANIMATION_INDEX);
+      CantHappen(ErrorCode::kEnqueueInvalidAnimation);
     }
     FramesFreeFrames(Animations[a].frames);
-    Animations[a].frames = FRAMES_SENTINEL;
+    Animations[a].frames = kFramesSentinel;
     AnimationIndex n = Animations[a].next;
     Animations[a].next = FreeAnimations;
     FreeAnimations = a;
@@ -289,44 +298,44 @@ void AnimationsFreeAnimation(AnimationIndex a) {
  * Building/enqueueing/destroying animations.
  */
 void AnimationsAddFrame(AnimationIndex a, FrameIndex f) {
-  if (a == ANIMATIONS_SENTINEL) {
-    CantHappen(ERROR_ADD_FRAME_TO_INVALID_ANIMATION);
+  if (a == kAnimationsSentinel) {
+    CantHappen(ErrorCode::kAddFrameToInvalidAnimation);
     return;
   }
-  if (f == FRAMES_SENTINEL) {
-    CantHappen(ERROR_ADD_INVALID_FRAME_TO_ANIMATION);
+  if (f == kFramesSentinel) {
+    CantHappen(ErrorCode::kAddInvalidFrameToAnimation);
     return;
   }
   FrameIndex *cur = &Animations[a].frames;
-  while (*cur != FRAMES_SENTINEL) {
+  while (*cur != kFramesSentinel) {
     cur = &(Frames[*cur].next);
   }
   *cur = f;
-  Frames[f].next = FRAMES_SENTINEL;
+  Frames[f].next = kFramesSentinel;
 }
 
 void AnimationsEnqueueAnimation(AnimationIndex a) {
-  if (a == ANIMATIONS_SENTINEL) {
-    CantHappen(ERROR_ENQUEUE_INVALID_ANIMATION);
+  if (a == kAnimationsSentinel) {
+    CantHappen(ErrorCode::kAddFrameToInvalidAnimation);
     return;
   }
   AnimationIndex *cur = &LiveAnimations;
-  while (*cur != ANIMATIONS_SENTINEL) {
+  while (*cur != kAnimationsSentinel) {
     cur = &(Animations[*cur].next);
   }
-  Animations[a].next = ANIMATIONS_SENTINEL;
+  Animations[a].next = kAnimationsSentinel;
   *cur = a;
   NumLiveAnimations++;
 }
 
 void AnimationsDequeueAnimation() {
   AnimationIndex cur = LiveAnimations;
-  if (cur == ANIMATIONS_SENTINEL) 
+  if (cur == kAnimationsSentinel) 
     return;
   LiveAnimations = Animations[cur].next;
-  Animations[cur].next = ANIMATIONS_SENTINEL;
+  Animations[cur].next = kAnimationsSentinel;
   NumLiveAnimations--;
-  if (LiveAnimations == ANIMATIONS_SENTINEL) {
+  if (LiveAnimations == kAnimationsSentinel) {
     Display.clear();
   }
   AnimationsFreeAnimation(cur);
@@ -336,7 +345,7 @@ void AnimationsDequeueAnimation() {
  * The animation engine.
  */
 FrameIndex NextFrame;             // Next frame to display
-                                  // If FRAMES_SENTINEL ==> no active animation
+                                  // If kFramesSentinel ==> no active animation
 uint32_t AnimationEpoch;          // Time at which the animation started
 uint32_t AnimationClock;          // Time elapsed since AnimationEpoch
 uint32_t FrameTransitionTime;     // Time after Epoch at which the a new frame is due
@@ -344,31 +353,31 @@ uint32_t AnimationTransitionTime; // Time after Epoch at which the current anima
 bool SkipToNextAnimation;         // true ==> discard the current animation now
 
 void AnimationUpdate() {
-  if (NextFrame != FRAMES_SENTINEL && (AnimationClock >= AnimationTransitionTime || SkipToNextAnimation)) {
+  if (NextFrame != kFramesSentinel && (AnimationClock >= AnimationTransitionTime || SkipToNextAnimation)) {
     AnimationsDequeueAnimation();
-    NextFrame = FRAMES_SENTINEL;
+    NextFrame = kFramesSentinel;
   }
   SkipToNextAnimation = false;
-  if (NextFrame == FRAMES_SENTINEL) {
-    if (LiveAnimations != ANIMATIONS_SENTINEL) {
+  if (NextFrame == kFramesSentinel) {
+    if (LiveAnimations != kAnimationsSentinel) {
       NextFrame = Animations[LiveAnimations].frames;
       AnimationEpoch = AnimationClock + AnimationEpoch;
       FrameTransitionTime = AnimationClock = 0;
       AnimationTransitionTime = Animations[LiveAnimations].duration; 
     }
   }
-  if (NextFrame != FRAMES_SENTINEL && AnimationClock >= FrameTransitionTime) {
+  if (NextFrame != kFramesSentinel && AnimationClock >= FrameTransitionTime) {
     Display.show(Frames[NextFrame]);
     FrameTransitionTime = AnimationClock + Frames[NextFrame].duration;
     NextFrame = Frames[NextFrame].next;
-    if (NextFrame == FRAMES_SENTINEL) {
+    if (NextFrame == kFramesSentinel) {
       NextFrame = Animations[LiveAnimations].frames;
     }
   }
 }
 
 void AnimationInit() {
-  NextFrame = FRAMES_SENTINEL;
+  NextFrame = kFramesSentinel;
 }
 
 /*
@@ -433,18 +442,18 @@ FrameIndex FrameInProgress;
 int FrameInProgressLine;
 
 void CloseFrameConstruction() {
-  if (FrameInProgress != FRAMES_SENTINEL) {
+  if (FrameInProgress != kFramesSentinel) {
     AnimationsAddFrame(AnimationInProgress, FrameInProgress);
-    FrameInProgress = FRAMES_SENTINEL;
+    FrameInProgress = kFramesSentinel;
     FrameInProgressLine = 0;
   }  
 }
 
 void CloseAnimationConstruction() {
-  if (AnimationInProgress != ANIMATIONS_SENTINEL) {
+  if (AnimationInProgress != kAnimationsSentinel) {
     CloseFrameConstruction();
     AnimationsEnqueueAnimation(AnimationInProgress);
-    AnimationInProgress = ANIMATIONS_SENTINEL;
+    AnimationInProgress = kAnimationsSentinel;
   }
 }
 
@@ -494,15 +503,15 @@ void ProcessCommand() {
       return;
     }
     if (!strncmp("RGB ", InputBuffer, 4)) {
-      if (FrameInProgress == FRAMES_SENTINEL) {
+      if (FrameInProgress == kFramesSentinel) {
         Serial.println(F("NAK RGB NFM"));
         return;
       }
-      if (FrameInProgressLine >= NUM_LINES) {
+      if (FrameInProgressLine >= kLedMatrixNumLines) {
         Serial.println(F("NAK RGB OFL"));
         return;        
       }
-      if (l != 100 || !ParseHex(&(Frames[FrameInProgress].pixels[FrameInProgressLine*3*NUM_COLS]), InputBuffer+4, BufP)) {
+      if (l != 100 || !ParseHex(&(Frames[FrameInProgress].pixels[FrameInProgressLine*3*kLedMatrixNumCols]), InputBuffer+4, BufP)) {
         Serial.println(F("NAK RGB ARG"));
         return;
       }
@@ -519,7 +528,7 @@ void ProcessCommand() {
       }
       CloseFrameConstruction();
       FrameInProgress = FramesGetFrame();    
-      if (FrameInProgress == FRAMES_SENTINEL) {
+      if (FrameInProgress == kFramesSentinel) {
         Serial.println(F("NAK FRM UFL"));
         return;
       }
@@ -536,7 +545,7 @@ void ProcessCommand() {
       }
       CloseAnimationConstruction();
       AnimationInProgress = AnimationsGetAnimation();
-      if (AnimationInProgress == ANIMATIONS_SENTINEL) {
+      if (AnimationInProgress == kAnimationsSentinel) {
         Serial.println(F("NAK ANM UFL"));
         return;
       }
@@ -554,7 +563,7 @@ void ProcessCommand() {
     if (!strncmp("QUE", InputBuffer, 3)) {
       AnimationIndex a = LiveAnimations;
       Serial.print(F("ACK QUE"));
-      if (a != ANIMATIONS_SENTINEL) {
+      if (a != kAnimationsSentinel) {
         Serial.print(F(" ("));
         Serial.print(Animations[a].duration-AnimationClock);
         Serial.print(F(", "));
@@ -562,7 +571,7 @@ void ProcessCommand() {
         Serial.print(F(")"));
         a = Animations[a].next;
       }
-      while (a != ANIMATIONS_SENTINEL) {
+      while (a != kAnimationsSentinel) {
         Serial.print(F(" ("));
         Serial.print(Animations[a].duration);
         Serial.print(F(", "));
@@ -581,7 +590,7 @@ void ProcessCommand() {
       return;
     }
     if (!strncmp("DON", InputBuffer, 3)) {
-      if (AnimationInProgress == ANIMATIONS_SENTINEL) {
+      if (AnimationInProgress == kAnimationsSentinel) {
         Serial.println(F("NAK DON NOA"));
         return;
       }
@@ -591,7 +600,7 @@ void ProcessCommand() {
     }
     if (!strncmp("RST", InputBuffer, 3)) {
       CloseAnimationConstruction();
-      while (LiveAnimations != ANIMATIONS_SENTINEL) {
+      while (LiveAnimations != kAnimationsSentinel) {
         AnimationsDequeueAnimation();
       }
       AnimationInit();
@@ -611,17 +620,17 @@ void ProcessCommand() {
       Serial.print(F("FrameInProgress: ")); Serial.println(FrameInProgress);
       Serial.print(F("FrameInProgressLine: ")); Serial.println(FrameInProgressLine);
       Serial.print(F("FreeAnimations:"));
-      for (AnimationIndex a = FreeAnimations; a != ANIMATIONS_SENTINEL; a = Animations[a].next) {
+      for (AnimationIndex a = FreeAnimations; a != kAnimationsSentinel; a = Animations[a].next) {
         Serial.print(F(" ")); Serial.print(a);
       }
       Serial.println();
       Serial.print(F("LiveAnimations:"));
-      for (AnimationIndex a = LiveAnimations; a != ANIMATIONS_SENTINEL; a = Animations[a].next) {
+      for (AnimationIndex a = LiveAnimations; a != kAnimationsSentinel; a = Animations[a].next) {
         Serial.print(F(" ")); Serial.print(a);
       }
       Serial.println();
       Serial.print(F("FreeFrames:"));
-      for (FrameIndex f = FreeFrames; f != FRAMES_SENTINEL; f = Frames[f].next) {
+      for (FrameIndex f = FreeFrames; f != kFramesSentinel; f = Frames[f].next) {
         Serial.print(F(" ")); Serial.print(f);
       }
       Serial.println();
@@ -636,8 +645,8 @@ void SerialInit() {
   Serial.println(F("Startup!"));
   BufP = InputBuffer;
   LineTooLong = false;
-  AnimationInProgress = ANIMATIONS_SENTINEL;
-  FrameInProgress = FRAMES_SENTINEL;
+  AnimationInProgress = kAnimationsSentinel;
+  FrameInProgress = kFramesSentinel;
   FrameInProgressLine = 0;  
 }
 
@@ -664,7 +673,7 @@ void SerialUpdate() {
  * And the usual Arduino song and dance.
  */
 void setup() {
-  GPIO.func_out_sel_cfg[DATA_PIN].inv_sel = 1;
+  GPIO.func_out_sel_cfg[kLedMatrixDataPin].inv_sel = 1;
   Display.clear();
   FramesReset();
   AnimationsReset();
