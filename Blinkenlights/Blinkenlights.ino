@@ -16,25 +16,45 @@
  *
  */
 
-// Use the I2S driver because the default RMT driver doesn't support inverting output.
-#define FASTLED_ESP32_I2S true
 #include "FastLED.h"       // Fastled library to control the LEDs
+
 
 // Pin definitions
 constexpr int kOnboardLed0Pin = 32;
 constexpr int kOnboardLed1Pin = 33;
-constexpr int kLedMatrixPowerPin = 12;
+constexpr int kLedMatrixPowerPin0 = 12;
+constexpr int kLedMatrixPowerPin1 = 26;
 constexpr int kLedMatrixDataPin = 27;
 constexpr int kUsbCc1Pin = 36;
 constexpr int kUsbCc2Pin = 39;
+constexpr int kTouch0Pin = 15;
+constexpr int kTouch1Pin = 2;
+constexpr int kTouch2Pin = 4;
+
+
+enum class UsbCurrentAvailable {
+  // USB-C host and we can draw 3A.
+  k3A,
+ 
+  // USB-C host and we can draw 1.5A.
+  k1_5A,
+ 
+  // We have either a USB-C host with no high current
+  // capability or a legacy host / 1.5A (BCS) power supply. We do
+  // not have the hardware to tell them apart, so we
+  // can't make any assumptions on current available
+  // beyond 100mA (though most hosts will be fine with 500mA).
+  kUsbStd,
+};
+ 
 
 // LED Matrix dimensions
 constexpr int kLedMatrixNumCols = 16;
 constexpr int kLedMatrixNumLines = 16;
 constexpr int kLedMatrixNumLeds = kLedMatrixNumCols * kLedMatrixNumLines;
+constexpr float kMatrixMaxCurrent = kLedMatrixNumLeds * 0.06f; // WS2812B: 60mA/LED
+constexpr float kMaxIdleCurrent = 0.5f; // Matrix + ESP32 idle
 
-// 
-constexpr int kMaxNumFrames = 32;
 
 /*
  * Animation frames
@@ -157,6 +177,65 @@ bool ParseHex(uint8_t *buf, const char *from, const char *to) {
 }
 
 
+/* 
+ * Read voltage at an input pin.
+ * 
+ * By default we have 11db (1/3.6) attenuation with 1.1V reference,
+ * so full scale voltage range is 1.1*3.6 = 3.96. In reality it's
+ * clamped to Vdd (3.3V) so we will never get a reading above that,
+ * but we need to the calculations using 3.96.
+ */
+float AnalogReadV(int pin) {
+  return analogRead(pin) * 3.96f / 4096;
+}
+ 
+/*
+ * Detect USB-C current advertisement according to Universal 
+ * Serial Bus Type-C Cable and Connector Specification
+ * Depending on cable orientation, either CC1 or CC2 will be >0V,
+ * and that tells us how much current we can draw.
+ * Voltage thresholds from Table 4-36:
+ * >0.2V = connected, >0.66V = 1.5A, >1.23V = 3A. 
+ */
+UsbCurrentAvailable DetermineMaxCurrent() {
+  float cc1 = AnalogReadV(kUsbCc1Pin);
+  float cc2 = AnalogReadV(kUsbCc2Pin);
+  float cc = max(cc1, cc2);
+  if (cc > 1.23f) {
+    return UsbCurrentAvailable::k3A;
+  } else if (cc > 0.66f) {
+    return UsbCurrentAvailable::k1_5A;
+  } else {
+    return UsbCurrentAvailable::kUsbStd;
+  }
+}
+
+/*
+ * Feed power to the LED matrix
+ */
+void EnableLEDPower() {
+  // Make sure data pin is low so we don't latch up the LEDs.
+  digitalWrite(kLedMatrixDataPin, LOW);
+ 
+  // Enable 1.5A current to charge up the capacitances.
+  digitalWrite(kLedMatrixPowerPin0, HIGH);
+
+  delay(50);
+ 
+  // Enable the second 1.5A switch to reduce switch resistance
+  // even if we only have 1.5A total, because we can limit it in
+  // firmware instead.
+  digitalWrite(kLedMatrixPowerPin1, HIGH);
+
+}
+ 
+void DisableLEDPower() {
+  digitalWrite(kLedMatrixDataPin, LOW);
+  digitalWrite(kLedMatrixPowerPin1, LOW);
+  digitalWrite(kLedMatrixPowerPin0, LOW);
+}
+
+
 /*
  * A LED matrix that can display frames.
  */
@@ -195,102 +274,106 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
 };
 
 
-LedMatrix<kLedMatrixNumLeds, kLedMatrixDataPin> Display;
+LedMatrix<kLedMatrixNumLeds, kLedMatrixDataPin> display;
 
 /*
  * The frames pool.
  */
-AnimationFrame Frames[kMaxNumFrames];
-FrameIndex FreeFrames;
-uint8_t NumFreeFrames;
+constexpr int kMaxNumFrames = 32;
+AnimationFrame frames[kMaxNumFrames];
+FrameIndex freeFrames;
+uint8_t numFreeFrames;
 
 void FramesReset() {
     for (int i = 0; i < kMaxNumFrames-1; i++) {
-    Frames[i].next = i+1;
+    frames[i].next = i+1;
   }
-  Frames[kMaxNumFrames-1].next = kFramesSentinel;
-  FreeFrames = (FrameIndex)0;
-  NumFreeFrames = kMaxNumFrames;
+  frames[kMaxNumFrames-1].next = kFramesSentinel;
+  freeFrames = (FrameIndex)0;
+  numFreeFrames = kMaxNumFrames;
 }
 
 FrameIndex FramesGetFrame() {
-  FrameIndex f = FreeFrames;
+  FrameIndex f = freeFrames;
   if (f != kFramesSentinel) {
-    FreeFrames = Frames[f].next;
-    Frames[f].next = kFramesSentinel;
-    NumFreeFrames--;
+    freeFrames = frames[f].next;
+    frames[f].next = kFramesSentinel;
+    numFreeFrames--;
   }
   return f;
 }
+
 
 void FramesFreeFrames(FrameIndex f) {
   while (f != kFramesSentinel) {
     if (f >= kMaxNumFrames) {
       CantHappen(ErrorCode::kInvalidFrameIndex);
     }
-    FrameIndex n = Frames[f].next;
-    Frames[f].next = FreeFrames;
-    FreeFrames = f;
+    FrameIndex n = frames[f].next;
+    frames[f].next = freeFrames;
+    freeFrames = f;
     f = n;
-    NumFreeFrames++;
+    numFreeFrames++;
   }
 }
+
 
 int FramesCountFrames(FrameIndex f) {
   int count = 0;
   
   while (f != kFramesSentinel) {
     count++;
-    f = Frames[f].next;
+    f = frames[f].next;
   }
   return count;
 }
 
+
 /*
  * The animations pool.
  */
-#define MAX_ANIMATIONS 16
-Animation Animations[MAX_ANIMATIONS];
-AnimationIndex FreeAnimations;
-uint8_t NumFreeAnimations;
-AnimationIndex LiveAnimations;
-uint8_t NumLiveAnimations;
+constexpr int kMaxNumAnimations = 16;
+Animation animations[kMaxNumAnimations];
+AnimationIndex freeAnimations;
+uint8_t numFreeAnimations;
+AnimationIndex liveAnimations;
+uint8_t numLiveAnimations;
 
 void AnimationsReset() {
-  for (int i = 0; i < MAX_ANIMATIONS-1; i++) {
-    Animations[i].next = i+1;
+  for (int i = 0; i < kMaxNumAnimations-1; i++) {
+    animations[i].next = i+1;
   }
-  Animations[MAX_ANIMATIONS-1].next = kAnimationsSentinel;
-  FreeAnimations = (AnimationIndex)0;
-  LiveAnimations = kAnimationsSentinel;
-  NumFreeAnimations = MAX_ANIMATIONS;
-  NumLiveAnimations = 0;
+  animations[kMaxNumAnimations-1].next = kAnimationsSentinel;
+  freeAnimations = (AnimationIndex)0;
+  liveAnimations = kAnimationsSentinel;
+  numFreeAnimations = kMaxNumAnimations;
+  numLiveAnimations = 0;
 }
 
 AnimationIndex AnimationsGetAnimation() {
-  AnimationIndex a = FreeAnimations;
+  AnimationIndex a = freeAnimations;
   if (a != kAnimationsSentinel) {
-    FreeAnimations = Animations[a].next;
-    NumFreeAnimations--;
-    Animations[a].duration = 0;
-    Animations[a].frames = kFramesSentinel;
-    Animations[a].next = kAnimationsSentinel;
+    freeAnimations = animations[a].next;
+    numFreeAnimations--;
+    animations[a].duration = 0;
+    animations[a].frames = kFramesSentinel;
+    animations[a].next = kAnimationsSentinel;
   }
   return a;
 }
 
 void AnimationsFreeAnimation(AnimationIndex a) {
   while (a != kAnimationsSentinel) {
-    if (a >= MAX_ANIMATIONS) {
+    if (a >= kMaxNumAnimations) {
       CantHappen(ErrorCode::kEnqueueInvalidAnimation);
     }
-    FramesFreeFrames(Animations[a].frames);
-    Animations[a].frames = kFramesSentinel;
-    AnimationIndex n = Animations[a].next;
-    Animations[a].next = FreeAnimations;
-    FreeAnimations = a;
+    FramesFreeFrames(animations[a].frames);
+    animations[a].frames = kFramesSentinel;
+    AnimationIndex n = animations[a].next;
+    animations[a].next = freeAnimations;
+    freeAnimations = a;
     a = n;
-    NumFreeAnimations++;
+    numFreeAnimations++;
   }
 }
 
@@ -306,12 +389,12 @@ void AnimationsAddFrame(AnimationIndex a, FrameIndex f) {
     CantHappen(ErrorCode::kAddInvalidFrameToAnimation);
     return;
   }
-  FrameIndex *cur = &Animations[a].frames;
+  FrameIndex *cur = &animations[a].frames;
   while (*cur != kFramesSentinel) {
-    cur = &(Frames[*cur].next);
+    cur = &(frames[*cur].next);
   }
   *cur = f;
-  Frames[f].next = kFramesSentinel;
+  frames[f].next = kFramesSentinel;
 }
 
 void AnimationsEnqueueAnimation(AnimationIndex a) {
@@ -319,24 +402,24 @@ void AnimationsEnqueueAnimation(AnimationIndex a) {
     CantHappen(ErrorCode::kAddFrameToInvalidAnimation);
     return;
   }
-  AnimationIndex *cur = &LiveAnimations;
+  AnimationIndex *cur = &liveAnimations;
   while (*cur != kAnimationsSentinel) {
-    cur = &(Animations[*cur].next);
+    cur = &(animations[*cur].next);
   }
-  Animations[a].next = kAnimationsSentinel;
+  animations[a].next = kAnimationsSentinel;
   *cur = a;
-  NumLiveAnimations++;
+  numLiveAnimations++;
 }
 
 void AnimationsDequeueAnimation() {
-  AnimationIndex cur = LiveAnimations;
+  AnimationIndex cur = liveAnimations;
   if (cur == kAnimationsSentinel) 
     return;
-  LiveAnimations = Animations[cur].next;
-  Animations[cur].next = kAnimationsSentinel;
-  NumLiveAnimations--;
-  if (LiveAnimations == kAnimationsSentinel) {
-    Display.clear();
+  liveAnimations = animations[cur].next;
+  animations[cur].next = kAnimationsSentinel;
+  numLiveAnimations--;
+  if (liveAnimations == kAnimationsSentinel) {
+    display.clear();
   }
   AnimationsFreeAnimation(cur);
 }
@@ -344,40 +427,40 @@ void AnimationsDequeueAnimation() {
 /*
  * The animation engine.
  */
-FrameIndex NextFrame;             // Next frame to display
+FrameIndex nextFrame;             // Next frame to display
                                   // If kFramesSentinel ==> no active animation
-uint32_t AnimationEpoch;          // Time at which the animation started
-uint32_t AnimationClock;          // Time elapsed since AnimationEpoch
-uint32_t FrameTransitionTime;     // Time after Epoch at which the a new frame is due
-uint32_t AnimationTransitionTime; // Time after Epoch at which the current animation should end
-bool SkipToNextAnimation;         // true ==> discard the current animation now
+uint32_t animationEpoch;          // Time at which the animation started
+uint32_t animationClock;          // Time elapsed since animationEpoch
+uint32_t frameTransitionTime;     // Time after Epoch at which the a new frame is due
+uint32_t animationTransitionTime; // Time after Epoch at which the current animation should end
+bool skipToNextAnimation;         // true ==> discard the current animation now
 
 void AnimationUpdate() {
-  if (NextFrame != kFramesSentinel && (AnimationClock >= AnimationTransitionTime || SkipToNextAnimation)) {
+  if (nextFrame != kFramesSentinel && (animationClock >= animationTransitionTime || skipToNextAnimation)) {
     AnimationsDequeueAnimation();
-    NextFrame = kFramesSentinel;
+    nextFrame = kFramesSentinel;
   }
-  SkipToNextAnimation = false;
-  if (NextFrame == kFramesSentinel) {
-    if (LiveAnimations != kAnimationsSentinel) {
-      NextFrame = Animations[LiveAnimations].frames;
-      AnimationEpoch = AnimationClock + AnimationEpoch;
-      FrameTransitionTime = AnimationClock = 0;
-      AnimationTransitionTime = Animations[LiveAnimations].duration; 
+  skipToNextAnimation = false;
+  if (nextFrame == kFramesSentinel) {
+    if (liveAnimations != kAnimationsSentinel) {
+      nextFrame = animations[liveAnimations].frames;
+      animationEpoch = animationClock + animationEpoch;
+      frameTransitionTime = animationClock = 0;
+      animationTransitionTime = animations[liveAnimations].duration; 
     }
   }
-  if (NextFrame != kFramesSentinel && AnimationClock >= FrameTransitionTime) {
-    Display.show(Frames[NextFrame]);
-    FrameTransitionTime = AnimationClock + Frames[NextFrame].duration;
-    NextFrame = Frames[NextFrame].next;
-    if (NextFrame == kFramesSentinel) {
-      NextFrame = Animations[LiveAnimations].frames;
+  if (nextFrame != kFramesSentinel && animationClock >= frameTransitionTime) {
+    display.show(frames[nextFrame]);
+    frameTransitionTime = animationClock + frames[nextFrame].duration;
+    nextFrame = frames[nextFrame].next;
+    if (nextFrame == kFramesSentinel) {
+      nextFrame = animations[liveAnimations].frames;
     }
   }
 }
 
 void AnimationInit() {
-  NextFrame = kFramesSentinel;
+  nextFrame = kFramesSentinel;
 }
 
 /*
@@ -433,40 +516,40 @@ void AnimationInit() {
  *   <-- ACK RST
  */
 #define BUFLEN 100
-char InputBuffer[BUFLEN];
-char *BufP;
-bool LineTooLong;
+char inputBuffer[BUFLEN];
+char *bufP;
+bool lineTooLong;
 
-AnimationIndex AnimationInProgress;
-FrameIndex FrameInProgress;
-int FrameInProgressLine;
+AnimationIndex animationInProgress;
+FrameIndex frameInProgress;
+int frameInProgressLine;
 
 void CloseFrameConstruction() {
-  if (FrameInProgress != kFramesSentinel) {
-    AnimationsAddFrame(AnimationInProgress, FrameInProgress);
-    FrameInProgress = kFramesSentinel;
-    FrameInProgressLine = 0;
+  if (frameInProgress != kFramesSentinel) {
+    AnimationsAddFrame(animationInProgress, frameInProgress);
+    frameInProgress = kFramesSentinel;
+    frameInProgressLine = 0;
   }  
 }
 
 void CloseAnimationConstruction() {
-  if (AnimationInProgress != kAnimationsSentinel) {
+  if (animationInProgress != kAnimationsSentinel) {
     CloseFrameConstruction();
-    AnimationsEnqueueAnimation(AnimationInProgress);
-    AnimationInProgress = kAnimationsSentinel;
+    AnimationsEnqueueAnimation(animationInProgress);
+    animationInProgress = kAnimationsSentinel;
   }
 }
 
 void ProcessCommand() {
-  int l = BufP-InputBuffer;
-  if (LineTooLong) {
+  int l = bufP-inputBuffer;
+  if (lineTooLong) {
     Serial.println(F("NAK LIN"));
     return;
   }
   if (l > 4) {
-    if (!strncmp((const char *)F("CLC "), InputBuffer, 4)) {
+    if (!strncmp((const char *)F("CLC "), inputBuffer, 4)) {
       CRGB c;
-      if (!ParseHex((uint8_t *)&c, InputBuffer+4, BufP)) {
+      if (!ParseHex((uint8_t *)&c, inputBuffer+4, bufP)) {
         Serial.println(F("NAK CLC ARG"));
         return;
       }
@@ -477,9 +560,9 @@ void ProcessCommand() {
       Serial.println(c.blue, HEX);
       return;
     }
-    if (!strncmp("DIM ", InputBuffer, 4)) {
+    if (!strncmp("DIM ", inputBuffer, 4)) {
       uint32_t b;
-      if (!ParseUInt32(&b, InputBuffer+4, BufP) || b > 255) {
+      if (!ParseUInt32(&b, inputBuffer+4, bufP) || b > 255) {
         Serial.println(F("NAK DIM ARG"));
         return;
       }
@@ -488,13 +571,13 @@ void ProcessCommand() {
       Serial.print(b);
       return;
     }
-    if (!strncmp("DTH ", InputBuffer, 4)) {
-      if (l == 6 && !strncmp("ON", InputBuffer+4, 2)) {
+    if (!strncmp("DTH ", inputBuffer, 4)) {
+      if (l == 6 && !strncmp("ON", inputBuffer+4, 2)) {
         FastLED.setDither(BINARY_DITHER);       
         Serial.println(F("ACK DTH ON"));
         return;
       }
-      if (l == 7 && !strncmp("OFF", InputBuffer+4, 3)) {
+      if (l == 7 && !strncmp("OFF", inputBuffer+4, 3)) {
         FastLED.setDither(DISABLE_DITHER);
         Serial.println(F("ACK DTH OFF"));
         return;
@@ -502,95 +585,95 @@ void ProcessCommand() {
       Serial.println(F("NAK DTH ARG"));
       return;
     }
-    if (!strncmp("RGB ", InputBuffer, 4)) {
-      if (FrameInProgress == kFramesSentinel) {
+    if (!strncmp("RGB ", inputBuffer, 4)) {
+      if (frameInProgress == kFramesSentinel) {
         Serial.println(F("NAK RGB NFM"));
         return;
       }
-      if (FrameInProgressLine >= kLedMatrixNumLines) {
+      if (frameInProgressLine >= kLedMatrixNumLines) {
         Serial.println(F("NAK RGB OFL"));
         return;        
       }
-      if (l != 100 || !ParseHex(&(Frames[FrameInProgress].pixels[FrameInProgressLine*3*kLedMatrixNumCols]), InputBuffer+4, BufP)) {
+      if (l != 100 || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
         Serial.println(F("NAK RGB ARG"));
         return;
       }
       Serial.print(F("ACK RGB "));
-      Serial.println(FrameInProgressLine);
-      FrameInProgressLine++;
+      Serial.println(frameInProgressLine);
+      frameInProgressLine++;
       return;
     }
-    if (!strncmp("FRM ", InputBuffer, 4)) {
+    if (!strncmp("FRM ", inputBuffer, 4)) {
       Duration d;
-      if (!ParseUInt32(&d, InputBuffer+4, BufP)) {
+      if (!ParseUInt32(&d, inputBuffer+4, bufP)) {
         Serial.println(F("NAK FRM ARG"));
         return;
       }
       CloseFrameConstruction();
-      FrameInProgress = FramesGetFrame();    
-      if (FrameInProgress == kFramesSentinel) {
+      frameInProgress = FramesGetFrame();    
+      if (frameInProgress == kFramesSentinel) {
         Serial.println(F("NAK FRM UFL"));
         return;
       }
-      Frames[FrameInProgress].duration = d;
+      frames[frameInProgress].duration = d;
       Serial.print(F("ACK FRM "));
       Serial.println(d);
       return;   
     }
-    if (!strncmp("ANM ", InputBuffer, 4)) {
+    if (!strncmp("ANM ", inputBuffer, 4)) {
       Duration d;
-      if (!ParseUInt32(&d, InputBuffer+4, BufP)) {
+      if (!ParseUInt32(&d, inputBuffer+4, bufP)) {
         Serial.println(F("NAK ANM ARG"));
         return;
       }
       CloseAnimationConstruction();
-      AnimationInProgress = AnimationsGetAnimation();
-      if (AnimationInProgress == kAnimationsSentinel) {
+      animationInProgress = AnimationsGetAnimation();
+      if (animationInProgress == kAnimationsSentinel) {
         Serial.println(F("NAK ANM UFL"));
         return;
       }
-      Animations[AnimationInProgress].duration = d;
+      animations[animationInProgress].duration = d;
       Serial.print(F("ACK ANM "));
       Serial.println(d);
       return;   
     }
   }
   if (l == 3) {
-    if (!strncmp("VER", InputBuffer, 3)) {
+    if (!strncmp("VER", inputBuffer, 3)) {
       Serial.println(F("ACK VER 1.0"));
       return;
     }
-    if (!strncmp("QUE", InputBuffer, 3)) {
-      AnimationIndex a = LiveAnimations;
+    if (!strncmp("QUE", inputBuffer, 3)) {
+      AnimationIndex a = liveAnimations;
       Serial.print(F("ACK QUE"));
       if (a != kAnimationsSentinel) {
         Serial.print(F(" ("));
-        Serial.print(Animations[a].duration-AnimationClock);
+        Serial.print(animations[a].duration-animationClock);
         Serial.print(F(", "));
-        Serial.print(FramesCountFrames(Animations[a].frames));
+        Serial.print(FramesCountFrames(animations[a].frames));
         Serial.print(F(")"));
-        a = Animations[a].next;
+        a = animations[a].next;
       }
       while (a != kAnimationsSentinel) {
         Serial.print(F(" ("));
-        Serial.print(Animations[a].duration);
+        Serial.print(animations[a].duration);
         Serial.print(F(", "));
-        Serial.print(FramesCountFrames(Animations[a].frames));
+        Serial.print(FramesCountFrames(animations[a].frames));
         Serial.print(F(")"));
-        a = Animations[a].next;
+        a = animations[a].next;
       }
       Serial.println();
       return;
     }
-    if (!strncmp("FRE", InputBuffer, 3)) {
+    if (!strncmp("FRE", inputBuffer, 3)) {
       Serial.print(F("ACK FRE "));
-      Serial.print(NumFreeAnimations);
+      Serial.print(numFreeAnimations);
       Serial.print(F(" "));
-      Serial.println(NumFreeFrames);
+      Serial.println(numFreeFrames);
       return;
     }
-    if (!strncmp("DON", InputBuffer, 3)) {
-      if (AnimationInProgress == kAnimationsSentinel) {
+    if (!strncmp("DON", inputBuffer, 3)) {
+      if (animationInProgress == kAnimationsSentinel) {
         Serial.println(F("NAK DON NOA"));
         return;
       }
@@ -598,39 +681,39 @@ void ProcessCommand() {
       Serial.println(F("ACK DON ANM"));
       return;
     }
-    if (!strncmp("RST", InputBuffer, 3)) {
+    if (!strncmp("RST", inputBuffer, 3)) {
       CloseAnimationConstruction();
-      while (LiveAnimations != kAnimationsSentinel) {
+      while (liveAnimations != kAnimationsSentinel) {
         AnimationsDequeueAnimation();
       }
       AnimationInit();
-      Display.clear();
+      display.clear();
       Serial.println(F("ACK RST"));
       return;
     }
-    if (!strncmp("NXT", InputBuffer, 3)) {
-      if (NumLiveAnimations > 1) {
-        SkipToNextAnimation = true;
+    if (!strncmp("NXT", inputBuffer, 3)) {
+      if (numLiveAnimations > 1) {
+        skipToNextAnimation = true;
       }
       Serial.println(F("ACK NXT"));
       return;
     }
-    if (!strncmp("DBG", InputBuffer, 3)) {
-      Serial.print(F("AnimationInProgress: ")); Serial.println(AnimationInProgress);
-      Serial.print(F("FrameInProgress: ")); Serial.println(FrameInProgress);
-      Serial.print(F("FrameInProgressLine: ")); Serial.println(FrameInProgressLine);
-      Serial.print(F("FreeAnimations:"));
-      for (AnimationIndex a = FreeAnimations; a != kAnimationsSentinel; a = Animations[a].next) {
+    if (!strncmp("DBG", inputBuffer, 3)) {
+      Serial.print(F("animationInProgress: ")); Serial.println(animationInProgress);
+      Serial.print(F("frameInProgress: ")); Serial.println(frameInProgress);
+      Serial.print(F("frameInProgressLine: ")); Serial.println(frameInProgressLine);
+      Serial.print(F("freeAnimations:"));
+      for (AnimationIndex a = freeAnimations; a != kAnimationsSentinel; a = animations[a].next) {
         Serial.print(F(" ")); Serial.print(a);
       }
       Serial.println();
-      Serial.print(F("LiveAnimations:"));
-      for (AnimationIndex a = LiveAnimations; a != kAnimationsSentinel; a = Animations[a].next) {
+      Serial.print(F("liveAnimations:"));
+      for (AnimationIndex a = liveAnimations; a != kAnimationsSentinel; a = animations[a].next) {
         Serial.print(F(" ")); Serial.print(a);
       }
       Serial.println();
-      Serial.print(F("FreeFrames:"));
-      for (FrameIndex f = FreeFrames; f != kFramesSentinel; f = Frames[f].next) {
+      Serial.print(F("freeFrames:"));
+      for (FrameIndex f = freeFrames; f != kFramesSentinel; f = frames[f].next) {
         Serial.print(F(" ")); Serial.print(f);
       }
       Serial.println();
@@ -643,11 +726,11 @@ void ProcessCommand() {
 void SerialInit() {
   Serial.begin(115200);
   Serial.println(F("Startup!"));
-  BufP = InputBuffer;
-  LineTooLong = false;
-  AnimationInProgress = kAnimationsSentinel;
-  FrameInProgress = kFramesSentinel;
-  FrameInProgressLine = 0;  
+  bufP = inputBuffer;
+  lineTooLong = false;
+  animationInProgress = kAnimationsSentinel;
+  frameInProgress = kFramesSentinel;
+  frameInProgressLine = 0;  
 }
 
 void SerialUpdate() {
@@ -655,17 +738,44 @@ void SerialUpdate() {
     while (Serial.available()) {
       int c = Serial.read();
       if (c == '\n') {
-        if (BufP != InputBuffer) {
+        if (bufP != inputBuffer) {
           ProcessCommand();
         }
-        BufP = InputBuffer;
-        LineTooLong = false;
-      } else if (BufP - InputBuffer < sizeof(InputBuffer)) {
-          *BufP++ = c;
+        bufP = inputBuffer;
+        lineTooLong = false;
+      } else if (bufP - inputBuffer < sizeof(inputBuffer)) {
+          *bufP++ = c;
       } else {
-        LineTooLong = true;
+        lineTooLong = true;
       }
     }
+  }
+}
+
+void PowerUpdate() {
+  static UsbCurrentAvailable current_available =
+      UsbCurrentAvailable::kUsbStd;
+  UsbCurrentAvailable current_advertisement = DetermineMaxCurrent();
+  if (current_available != current_advertisement) {
+    switch (current_advertisement) {
+      case UsbCurrentAvailable::k3A:
+        digitalWrite(kOnboardLed0Pin, HIGH);
+        digitalWrite(kOnboardLed1Pin, HIGH);
+        FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) / kMatrixMaxCurrent);
+        EnableLEDPower();
+        break;
+      case UsbCurrentAvailable::k1_5A:
+        digitalWrite(kOnboardLed0Pin, LOW);
+        digitalWrite(kOnboardLed1Pin, HIGH);
+        FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) / kMatrixMaxCurrent);
+        EnableLEDPower();
+        break;
+      default:
+        digitalWrite(kOnboardLed0Pin, LOW);
+        digitalWrite(kOnboardLed1Pin, LOW);
+        DisableLEDPower();
+    }
+    current_available = current_advertisement;
   }
 }
 
@@ -673,8 +783,15 @@ void SerialUpdate() {
  * And the usual Arduino song and dance.
  */
 void setup() {
-  GPIO.func_out_sel_cfg[kLedMatrixDataPin].inv_sel = 1;
-  Display.clear();
+  pinMode(kOnboardLed0Pin, OUTPUT);
+  pinMode(kOnboardLed1Pin, OUTPUT);
+  pinMode(kLedMatrixDataPin, OUTPUT);
+  pinMode(kLedMatrixPowerPin0, OUTPUT);
+  pinMode(kLedMatrixPowerPin1, OUTPUT);
+  pinMode(kTouch0Pin, INPUT);
+  pinMode(kTouch1Pin, INPUT);
+  pinMode(kTouch2Pin, INPUT);
+  display.clear();
   FramesReset();
   AnimationsReset();
   SerialInit();
@@ -682,7 +799,8 @@ void setup() {
 }
 
 void loop() { 
-  AnimationClock = millis()-AnimationEpoch;
+  animationClock = millis()-animationEpoch;
+  PowerUpdate();
   AnimationUpdate();
   SerialUpdate();
 }
