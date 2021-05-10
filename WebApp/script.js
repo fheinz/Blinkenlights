@@ -71,7 +71,7 @@ async function connect() {
   const encoder = new TextEncoderStream();
   outputDone = encoder.readable.pipeTo(port.writable);
   outputStream = encoder.writable;
-  writeToStream('', 'RST', 'VER');
+  writeToStream('', 'RST', 'VER', 'PWR');
   updateColorCorrection();
 
   let decoder = new TextDecoderStream();

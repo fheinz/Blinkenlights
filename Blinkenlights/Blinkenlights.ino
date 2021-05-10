@@ -33,6 +33,9 @@ constexpr int kTouch2Pin = 4;
 
 
 enum class UsbCurrentAvailable {
+  // Current available unknown
+  kNone,
+
   // USB-C host and we can draw 3A.
   k3A,
  
@@ -235,6 +238,60 @@ void DisableLEDPower() {
   digitalWrite(kLedMatrixPowerPin0, LOW);
 }
 
+UsbCurrentAvailable currentAvailable = UsbCurrentAvailable::kNone;
+UsbCurrentAvailable currentAvailableDetected = UsbCurrentAvailable::kNone;
+
+void ReportPower() {
+  switch (currentAvailable) {
+    case UsbCurrentAvailable::kNone:
+      Serial.println(F("PWR ???A"));
+      break;
+    case UsbCurrentAvailable::k3A:
+      Serial.println(F("PWR 3.0A"));
+      break;
+    case UsbCurrentAvailable::k1_5A:
+      Serial.println(F("PWR 1.5A"));
+      break;
+    default:
+      Serial.println(F("PWR 0.5A"));
+  } 
+}
+
+uint32_t PowerUpdate() {
+  UsbCurrentAvailable current_advertisement = DetermineMaxCurrent();
+  if (currentAvailable == current_advertisement) 
+    goto done;
+  if (currentAvailableDetected == current_advertisement) {
+    // We detected this change 15ms ago, so it can't be a PD message
+    // because those take 10ms max.
+    switch (current_advertisement) {
+      case UsbCurrentAvailable::k3A:
+        digitalWrite(kOnboardLed0Pin, HIGH);
+        digitalWrite(kOnboardLed1Pin, HIGH);
+        FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) / kMatrixMaxCurrent);
+        EnableLEDPower();
+        break;
+      case UsbCurrentAvailable::k1_5A:
+        digitalWrite(kOnboardLed0Pin, LOW);
+        digitalWrite(kOnboardLed1Pin, HIGH);
+        FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) / kMatrixMaxCurrent);
+        EnableLEDPower();
+        break;
+      default:
+        digitalWrite(kOnboardLed0Pin, LOW);
+        digitalWrite(kOnboardLed1Pin, LOW);
+        DisableLEDPower();
+    }
+    currentAvailable = current_advertisement;
+    ReportPower();
+  done:
+    currentAvailableDetected = UsbCurrentAvailable::kNone;
+    return 30;
+  }
+  // We just detected this change... check back in 15ms to see if it's still there.
+  currentAvailableDetected = current_advertisement;
+  return 15;
+}
 
 /*
  * A LED matrix that can display frames.
@@ -643,6 +700,11 @@ void ProcessCommand() {
       Serial.println(F("ACK VER 1.0"));
       return;
     }
+    if (!strncmp("PWR", inputBuffer, 3)) {
+      Serial.print(F("ACK "));
+      ReportPower();
+      return;
+    }
     if (!strncmp("QUE", inputBuffer, 3)) {
       AnimationIndex a = liveAnimations;
       Serial.print(F("ACK QUE"));
@@ -725,6 +787,7 @@ void ProcessCommand() {
 
 void SerialInit() {
   Serial.begin(115200);
+  Serial.setRxBufferSize(4*1024); // Enough to hold 30ms worth of serial data.
   Serial.println(F("Startup!"));
   bufP = inputBuffer;
   lineTooLong = false;
@@ -752,33 +815,6 @@ void SerialUpdate() {
   }
 }
 
-void PowerUpdate() {
-  static UsbCurrentAvailable current_available =
-      UsbCurrentAvailable::kUsbStd;
-  UsbCurrentAvailable current_advertisement = DetermineMaxCurrent();
-  if (current_available != current_advertisement) {
-    switch (current_advertisement) {
-      case UsbCurrentAvailable::k3A:
-        digitalWrite(kOnboardLed0Pin, HIGH);
-        digitalWrite(kOnboardLed1Pin, HIGH);
-        FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) / kMatrixMaxCurrent);
-        EnableLEDPower();
-        break;
-      case UsbCurrentAvailable::k1_5A:
-        digitalWrite(kOnboardLed0Pin, LOW);
-        digitalWrite(kOnboardLed1Pin, HIGH);
-        FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) / kMatrixMaxCurrent);
-        EnableLEDPower();
-        break;
-      default:
-        digitalWrite(kOnboardLed0Pin, LOW);
-        digitalWrite(kOnboardLed1Pin, LOW);
-        DisableLEDPower();
-    }
-    current_available = current_advertisement;
-  }
-}
-
 /*
  * And the usual Arduino song and dance.
  */
@@ -798,9 +834,20 @@ void setup() {
   AnimationInit();
 }
 
-void loop() { 
-  animationClock = millis()-animationEpoch;
-  PowerUpdate();
+void loop() {
+  uint32_t loop_epoch = millis(); 
+  animationClock = loop_epoch - animationEpoch;
+  uint32_t next_loop = PowerUpdate();
   AnimationUpdate();
   SerialUpdate();
+  
+  // USB-C spec says the host can change the advertised current limit at any time,
+  // and we have tSinkAdj(max) (60ms) to comply.
+  // When we detect a CC value change, we also have to wait tRpValueChange(min) (10ms)
+  // to make sure this is not a PD message (which cause, for our purposes, noise on the
+  // CC line).
+  // So we implement that by having the loop run at 30ms, and if we see a CC change,
+  // we sample again in 15ms to make sure the value is stable, satisfying both timing
+  // requirements.
+  delay(loop_epoch + next_loop - loop_epoch);
 }
