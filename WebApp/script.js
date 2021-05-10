@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /**
  * @name connect
- * Opens a Web Serial connection to a micro:bit and sets up the input and
+ * Opens a Web Serial connection to the board and sets up the input and
  * output stream.
  */
 async function connect() {
@@ -132,7 +132,7 @@ async function readLoop() {
   while (true) {
     const { value, done } = await reader.read();
     if (value) {
-      console.log(value);
+      console.log('[RECV]' + value + '\n');
     }
     if (done) {
       console.log('[readLoop] DONE', done);
@@ -209,7 +209,7 @@ class LineBreakTransformer {
 
   transform(chunk, controller) {
     this.container += chunk;
-    const lines = this.container.split('\r\n');
+    const lines = this.container.split('\n');
     this.container = lines.pop();
     lines.forEach(line => controller.enqueue(line));
   }
