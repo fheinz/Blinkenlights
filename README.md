@@ -2,13 +2,15 @@
 
 A LED display for pixel art animations.
 
-This project builds on [Matt Lai](https://github.com/matthewlai)'s yet
-unpublished LED matrix control board to create a display for pixel art
-animations.
+This project builds on [Matt Lai](https://github.com/matthewlai)'s [LED matrix
+control board](https://github.com/matthewlai/ESP32LEDControl) (see also his
+[blog post on the development
+process](https://dubiouscreations.com/2021/05/04/designing-an-esp32-based-rgb-matrix-driver-and-making-500-of-them/)!)
+to create a display for pixel art animations.
 
-Coupled with a companion webapp and corresponding back-end (which are in the
-works), it can be used by groups of people to share animations and create a
-sense of shared space despite being physically distant.
+Coupled with a companion webapp and corresponding back-end (TBD), it can be used
+by groups of people to share animations amongst themselves, creating a shared
+experience despite being physically distant.
 
 ## Contents:
 
