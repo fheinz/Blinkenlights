@@ -30,6 +30,31 @@ codelab](https://goo.gle/web-serial-codelab), and the sample pixel art is based
 on [henrysoftware](https://henrysoftware.itch.io/)'s [free pixel
 food](https://henrysoftware.itch.io/pixel-food) collection.
 
+
+## How to use the WebApp
+
+The WebApp allows you to interact with the display from your browser. Two
+caveats:
+
+* it requires Chrome, because other browsers don't support WebSerial (yet?)
+* it won't work if you just load Webapp/index.html from the disk: WebSerial will
+  not get access to the port unless the page has been loaded over HTTP.
+
+The easiest way to satisfy the second requirement is just to run Python's
+default HTTP server:
+
+```sh
+cd Blinkenlights/WebApp
+python -m http.server
+```
+
+You can now load the app at http://localhost:8000/ and get it to talk to the
+board by clicking on the `Connect` button and selecting the approriate serial
+port in the pop-up that appears.
+
+Once connected, you use the various UI elements to display stuff in the matrix.
+
+
 ## License
 
 Copyright 2019 Google, Inc.
