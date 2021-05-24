@@ -40,8 +40,12 @@ caveats:
 * it won't work if you just load Webapp/index.html from the disk: WebSerial will
   not get access to the port unless the page has been loaded over HTTP.
 
-The easiest way to satisfy the second requirement is just to run Python's
-default HTTP server:
+If you just want to take the WebApp for a spin, the easiest way to satisfy the
+second requirement is to [click
+here](https://fheinz.github.io/Blinkenlights/WebApp/).
+
+That won't work if you want to test your own local changes to the WebApp. In
+that case, running Python's default HTTP server in the WebApp directory will do:
 
 ```sh
 cd Blinkenlights/WebApp
