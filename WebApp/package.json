@@ -1,0 +1,43 @@
+{
+    "name": "blinkenlights-demo",
+    "version": "1.0.0",
+    "description": "Proof-of-concept WebApp to control the Blinkenlights board.",
+    "main": "script.js",
+    "dependencies": {
+        "@babel/preset-env": "^7.14.4",
+        "browserify": "^17.0.0",
+        "gifuct-js": "^2.1.1",
+        "watchify": "^4.0.0"
+    },
+    "devDependencies": {
+        "@babel/core": "^7.14.3",
+        "babelify": "^10.0.0"
+    },
+    "browserify": {
+        "transform": [
+            [
+                "babelify",
+                {
+                    "presets": [
+                        "@babel/preset-env"
+                    ]
+                }
+            ]
+        ]
+    },
+    "scripts": {
+        "build": "browserify script.js -o bundle.js",
+        "watch": "watchify script.js -o bundle.js -v",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/fheinz/Blinkenlights.git"
+    },
+    "author": "Fede Heinz",
+    "license": "Apache-2.0",
+    "bugs": {
+        "url": "https://github.com/fheinz/Blinkenlights/issues"
+    },
+    "homepage": "https://github.com/fheinz/Blinkenlights#readme"
+}
