@@ -49,6 +49,10 @@ const greenCCSlider = document.getElementById('greenCCSlider');
 const greenCCDisplay = document.getElementById('greenCCDisplay');
 const debugButton = document.getElementById('debugButton');
 
+const usbFilter = [
+    {usbVendorId: 0x1a86, usbProductId: 0x7523}
+];
+
 document.addEventListener('DOMContentLoaded', () => {
     butConnect.addEventListener('click', clickConnect);
 
@@ -76,7 +80,12 @@ function paddedHex(number, width) {
  * output stream.
  */
 async function connect() {
-    port = await navigator.serial.requestPort();
+    const ports = await navigator.serial.getPorts();
+    if (ports.length == 1) {
+	port = ports[0];
+    } else {
+	port = await navigator.serial.requestPort({ filters: usbFilter });
+    }
     // - Wait for the port to open.
     await port.open({ baudRate: 115200 });
 
