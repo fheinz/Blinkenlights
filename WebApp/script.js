@@ -62,6 +62,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 /**
+ * @name paddedHex
+ * Return the hex string representation of `number`, padded to `width` places.
+ */
+function paddedHex(number, width) {
+    return number.toString(16).padStart(width, '0');
+}
+
+
+/**
  * @name connect
  * Opens a Web Serial connection to the board and sets up the input and
  * output stream.
@@ -189,7 +198,10 @@ function sendAnimation(img) {
 			var pix = [];
 			for (var c = 0; c < COLS; c++) {
 			    var offset = (r * COLS + c) * 4;
-			    pix.push((gammaTable[bitmap[offset]]<<16 | gammaTable[bitmap[offset+1]] << 8 | gammaTable[bitmap[offset+2]]).toString(16).padStart(6, "0"));
+			    pix.push(paddedHex(
+				gammaTable[bitmap[offset]]<<16 |
+				    gammaTable[bitmap[offset+1]] << 8 |
+				    gammaTable[bitmap[offset+2]], 6));
 			}
 			writeToStream('RGB ' + pix.join('').toUpperCase());
 		    }
@@ -279,9 +291,9 @@ function updateGamma() {
 function updateColorCorrection() {
     writeToStream(
 	'CLC ' +
-	    ( Math.round(255*redCCSlider.value).toString(16).padStart('0', 2) +
-	      Math.round(255*greenCCSlider.value).toString(16).padStart('0', 2) +
-	      Math.round(255*blueCCSlider.value).toString(16).padStart('0', 2)
+	    ( paddedHex(Math.round(2.55*redCCSlider.value), 2) +
+	      paddedHex(Math.round(2.55*greenCCSlider.value), 2) +
+	      paddedHex(Math.round(2.55*blueCCSlider.value), 2)
 	    ).toUpperCase());
 }
 
