@@ -50,14 +50,14 @@ const greenCCDisplay = document.getElementById('greenCCDisplay');
 const debugButton = document.getElementById('debugButton');
 
 document.addEventListener('DOMContentLoaded', () => {
-  butConnect.addEventListener('click', clickConnect);
+    butConnect.addEventListener('click', clickConnect);
 
-  const notSupported = document.getElementById('notSupported');
-  notSupported.classList.toggle('hidden', 'serial' in navigator);
-  initCheckboxes();
-  initPixelArt();
-  initGamma();
-  debugButton.onclick = function() { if (port) writeToStream('DBG'); };
+    const notSupported = document.getElementById('notSupported');
+    notSupported.classList.toggle('hidden', 'serial' in navigator);
+    initCheckboxes();
+    initPixelArt();
+    initGamma();
+    debugButton.onclick = function() { if (port) writeToStream('DBG'); };
 });
 
 
@@ -67,21 +67,21 @@ document.addEventListener('DOMContentLoaded', () => {
  * output stream.
  */
 async function connect() {
-  port = await navigator.serial.requestPort();
-  // - Wait for the port to open.
-  await port.open({ baudRate: 115200 });
+    port = await navigator.serial.requestPort();
+    // - Wait for the port to open.
+    await port.open({ baudRate: 115200 });
 
-  const encoder = new TextEncoderStream();
-  outputDone = encoder.readable.pipeTo(port.writable);
-  outputStream = encoder.writable;
-  writeToStream('', 'RST', 'VER', 'PWR');
-  updateColorCorrection();
+    const encoder = new TextEncoderStream();
+    outputDone = encoder.readable.pipeTo(port.writable);
+    outputStream = encoder.writable;
+    writeToStream('', 'RST', 'VER', 'PWR');
+    updateColorCorrection();
 
-  let decoder = new TextDecoderStream();
-  inputDone = port.readable.pipeTo(decoder.writable);
-  inputStream = decoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer()));
-  reader = inputStream.getReader();
-  readLoop();
+    let decoder = new TextDecoderStream();
+    inputDone = port.readable.pipeTo(decoder.writable);
+    inputStream = decoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer()));
+    reader = inputStream.getReader();
+    readLoop();
 }
 
 
@@ -90,21 +90,21 @@ async function connect() {
  * Closes the Web Serial connection.
  */
 async function disconnect() {
-  writeToStream('RST');
-  if (reader) {
-    await reader.cancel();
-    await inputDone.catch(() => {});
-    reader = null;
-    inputDone = null;
-  }
-  if (outputStream) {
-    await outputStream.getWriter().close();
-    await outputDone;
-    outputStream = null;
-    outputDone = null;
-  }
-  await port.close();
-  port = null;
+    writeToStream('RST');
+    if (reader) {
+	await reader.cancel();
+	await inputDone.catch(() => {});
+	reader = null;
+	inputDone = null;
+    }
+    if (outputStream) {
+	await outputStream.getWriter().close();
+	await outputDone;
+	outputStream = null;
+	outputDone = null;
+    }
+    await port.close();
+    port = null;
 }
 
 
@@ -113,17 +113,17 @@ async function disconnect() {
  * Click handler for the connect/disconnect button.
  */
 async function clickConnect() {
-  if (port) {
-    await disconnect();
-    toggleUIConnected(false);
-    return;
-  }
-  await connect();
-  toggleUIConnected(true);
-  if (currentImage)
-    sendAnimation(currentImage);
-  else
-    sendGrid();
+    if (port) {
+	await disconnect();
+	toggleUIConnected(false);
+	return;
+    }
+    await connect();
+    toggleUIConnected(true);
+    if (currentImage)
+	sendAnimation(currentImage);
+    else
+	sendGrid();
 }
 
 
@@ -132,17 +132,17 @@ async function clickConnect() {
  * Reads data from the input stream and displays it on screen.
  */
 async function readLoop() {
-  while (true) {
-    const { value, done } = await reader.read();
-    if (value) {
-      console.log('[RECV]' + value + '\n');
+    while (true) {
+	const { value, done } = await reader.read();
+	if (value) {
+	    console.log('[RECV]' + value + '\n');
+	}
+	if (done) {
+	    console.log('[readLoop] DONE', done);
+	    reader.releaseLock();
+	    break;
+	}
     }
-    if (done) {
-      console.log('[readLoop] DONE', done);
-      reader.releaseLock();
-      break;
-    }
-  }
 }
 
 
@@ -151,17 +151,17 @@ async function readLoop() {
  * Iterates over the checkboxes and generates the command to set the LEDs.
  */
 function sendGrid() {
-  writeToStream('ANM 600000', 'FRM 1000');
-  var i = 0;
-  var px = [];
-  ledCBs.forEach((cb) => {
-    px.push(cb.checked ? 'FFFFFF' : '000000');
-    if (++i % COLS == 0 ) {
-      writeToStream('RGB ' + px.join(''));
-      px = [];
-    }
-  });
-  writeToStream('DON', 'NXT');
+    writeToStream('ANM 600000', 'FRM 1000');
+    var i = 0;
+    var px = [];
+    ledCBs.forEach((cb) => {
+	px.push(cb.checked ? 'FFFFFF' : '000000');
+	if (++i % COLS == 0 ) {
+	    writeToStream('RGB ' + px.join(''));
+	    px = [];
+	}
+    });
+    writeToStream('DON', 'NXT');
 }
 
 
@@ -170,35 +170,35 @@ function sendGrid() {
  * Sends a GIF animation to the display
  */
 function sendAnimation(img) {
-  var oReq = new XMLHttpRequest();
-  oReq.open('GET', img.src, true);
-  oReq.responseType = 'arraybuffer';
+    var oReq = new XMLHttpRequest();
+    oReq.open('GET', img.src, true);
+    oReq.responseType = 'arraybuffer';
 
-  oReq.onload = function(oEvent) {
-    var arrayBuffer = oReq.response;
-    if (arrayBuffer) {
-      var gif = parseGIF(arrayBuffer);
-      var frames = decompressFrames(gif, true);
-      if (frames) {
-        writeToStream('ANM 600000');
-        frames.forEach(function(frame) {
-          var bitmap = frame.patch;
-          writeToStream('FRM ' +
-                        ('delay' in frame ? frame.delay : 1000));
-          for (var r = 0; r < ROWS; r++) {
-            var pix = [];
-            for (var c = 0; c < COLS; c++) {
-              var offset = (r * COLS + c) * 4;
-              pix.push((gammaTable[bitmap[offset]]<<16 | gammaTable[bitmap[offset+1]] << 8 | gammaTable[bitmap[offset+2]]).toString(16).padStart(6, "0"));
-           }
-           writeToStream('RGB ' + pix.join('').toUpperCase());
-          }
-        });
-        writeToStream('DON', 'NXT');
-      }
+    oReq.onload = function(oEvent) {
+	var arrayBuffer = oReq.response;
+	if (arrayBuffer) {
+	    var gif = parseGIF(arrayBuffer);
+	    var frames = decompressFrames(gif, true);
+	    if (frames) {
+		writeToStream('ANM 600000');
+		frames.forEach(function(frame) {
+		    var bitmap = frame.patch;
+		    writeToStream('FRM ' +
+				  ('delay' in frame ? frame.delay : 1000));
+		    for (var r = 0; r < ROWS; r++) {
+			var pix = [];
+			for (var c = 0; c < COLS; c++) {
+			    var offset = (r * COLS + c) * 4;
+			    pix.push((gammaTable[bitmap[offset]]<<16 | gammaTable[bitmap[offset+1]] << 8 | gammaTable[bitmap[offset+2]]).toString(16).padStart(6, "0"));
+			}
+			writeToStream('RGB ' + pix.join('').toUpperCase());
+		    }
+		});
+		writeToStream('DON', 'NXT');
+	    }
+	}
     }
-  }
-  oReq.send(null)
+    oReq.send(null)
 }
 
 
@@ -208,12 +208,12 @@ function sendAnimation(img) {
  * @param  {...string} lines lines to send to the micro:bit
  */
 function writeToStream(...lines) {
-  const writer = outputStream.getWriter();
-  lines.forEach((line) => {
-    console.log('[SEND]', line);
-    writer.write(line + '\n');
-  });
-  writer.releaseLock();
+    const writer = outputStream.getWriter();
+    lines.forEach((line) => {
+	console.log('[SEND]', line);
+	writer.write(line + '\n');
+    });
+    writer.releaseLock();
 }
 
 /**
@@ -221,112 +221,113 @@ function writeToStream(...lines) {
  * TransformStream to parse the stream into lines.
  */
 class LineBreakTransformer {
-  constructor() {
-    // A container for holding stream data until a new line.
-    this.container = '';
-  }
+    constructor() {
+	// A container for holding stream data until a new line.
+	this.container = '';
+    }
 
-  transform(chunk, controller) {
-    this.container += chunk;
-    const lines = this.container.split('\n');
-    this.container = lines.pop();
-    lines.forEach(line => controller.enqueue(line));
-  }
+    transform(chunk, controller) {
+	this.container += chunk;
+	const lines = this.container.split('\n');
+	this.container = lines.pop();
+	lines.forEach(line => controller.enqueue(line));
+    }
 
-  flush(controller) {
-    controller.enqueue(this.container)
-  }
+    flush(controller) {
+	controller.enqueue(this.container)
+    }
 }
 
 function initCheckboxes() {
-  ledCBs.forEach((cb) => {
-    cb.addEventListener('change', () => {
-      if (port) sendGrid();
-      currentImage = null;
+    ledCBs.forEach((cb) => {
+	cb.addEventListener('change', () => {
+	    if (port) sendGrid();
+	    currentImage = null;
+	});
     });
-  });
 }
 
 function initPixelArt() {
-  pixelArt.forEach((img) => {
-    var ctx = canvas.getContext('2d');
-    img.crossOrigin = "Anonymous";
-    ctx.drawImage(img, 0, 0);
-    img.onclick = function() {
-      if (port) sendAnimation(img);
-      currentImage = img;
-    };
-  });
+    pixelArt.forEach((img) => {
+	var ctx = canvas.getContext('2d');
+	img.crossOrigin = "Anonymous";
+	ctx.drawImage(img, 0, 0);
+	img.onclick = function() {
+	    if (port) sendAnimation(img);
+	    currentImage = img;
+	};
+    });
 }
 
 function updateGammaDisplay() {
-  gammaDisplay.innerHTML = gammaSlider.value/100.0;
+    gammaDisplay.innerHTML = gammaSlider.value/100.0;
 }
 
 function updateSliderDisplay(slider, display) {
-  display.innerHTML = slider.value/100.0;
+    display.innerHTML = slider.value/100.0;
 }
 
 function updateGamma() {
-  var invGamma = 100.0/gammaSlider.value;
-  let i = 0;
-  gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**invGamma)));
-  if (currentImage) {
-    sendAnimation(currentImage);
-  }
+    var invGamma = 100.0/gammaSlider.value;
+    let i = 0;
+    gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**invGamma)));
+    if (currentImage) {
+	sendAnimation(currentImage);
+    }
 }
 
 function updateColorCorrection() {
-  writeToStream('CLC ' +
-      ( Math.round(2.55*redCCSlider.value).toString(16).padStart('0', 2) +
-        Math.round(2.55*greenCCSlider.value).toString(16).padStart('0', 2) +
-        Math.round(2.55*blueCCSlider.value).toString(16).padStart('0', 2)
-      ).toUpperCase());
+    writeToStream(
+	'CLC ' +
+	    ( Math.round(255*redCCSlider.value).toString(16).padStart('0', 2) +
+	      Math.round(255*greenCCSlider.value).toString(16).padStart('0', 2) +
+	      Math.round(255*blueCCSlider.value).toString(16).padStart('0', 2)
+	    ).toUpperCase());
 }
 
 function initGamma() {
-  gammaSlider.oninput = function () {
-    updateSliderDisplay(gammaSlider, gammaDisplay);
-  };
-  gammaSlider.oninput();
-  redCCSlider.oninput = function () {
-    updateSliderDisplay(redCCSlider, redCCDisplay);
-  };
-  redCCSlider.oninput();
-  greenCCSlider.oninput = function () {
-    updateSliderDisplay(greenCCSlider, greenCCDisplay);
-  };
-  greenCCSlider.oninput();
-  blueCCSlider.oninput = function () {
-    updateSliderDisplay(blueCCSlider, blueCCDisplay);
-  };
-  blueCCSlider.oninput();
-  gammaSlider.onchange = updateGamma;
-  redCCSlider.onchange = updateColorCorrection;
-  greenCCSlider.onchange = updateColorCorrection;
-  blueCCSlider.onchange = updateColorCorrection;
-  updateGamma();
+    gammaSlider.oninput = function () {
+	updateSliderDisplay(gammaSlider, gammaDisplay);
+    };
+    gammaSlider.oninput();
+    redCCSlider.oninput = function () {
+	updateSliderDisplay(redCCSlider, redCCDisplay);
+    };
+    redCCSlider.oninput();
+    greenCCSlider.oninput = function () {
+	updateSliderDisplay(greenCCSlider, greenCCDisplay);
+    };
+    greenCCSlider.oninput();
+    blueCCSlider.oninput = function () {
+	updateSliderDisplay(blueCCSlider, blueCCDisplay);
+    };
+    blueCCSlider.oninput();
+    gammaSlider.onchange = updateGamma;
+    redCCSlider.onchange = updateColorCorrection;
+    greenCCSlider.onchange = updateColorCorrection;
+    blueCCSlider.onchange = updateColorCorrection;
+    updateGamma();
 }
 
 function drawGrid(grid) {
-  if (grid) {
-    grid.forEach((v, i) => {
-      ledCBs[i].checked = !!v;
-    });
-  }
+    if (grid) {
+	grid.forEach((v, i) => {
+	    ledCBs[i].checked = !!v;
+	});
+    }
 }
 
 function toggleUIConnected(connected) {
-  let lbl = 'Connect';
-  if (connected) {
-    lbl = 'Disconnect';
-  }
-  butConnect.textContent = lbl;
-  ledCBs.forEach((cb) => {
+    let lbl = 'Connect';
     if (connected) {
-      cb.removeAttribute('disabled');
-      return;
+	lbl = 'Disconnect';
     }
-    cb.setAttribute('disabled', true);
-  });
+    butConnect.textContent = lbl;
+    ledCBs.forEach((cb) => {
+	if (connected) {
+	    cb.removeAttribute('disabled');
+	    return;
+	}
+	cb.setAttribute('disabled', true);
+    });
 }
