@@ -81,13 +81,16 @@ function paddedHex(number, width) {
  */
 async function connect() {
     const ports = await navigator.serial.getPorts();
-    if (ports.length == 1) {
-	port = ports[0];
-    } else {
-	port = await navigator.serial.requestPort({ filters: usbFilter });
+    try {
+	if (ports.length == 1) {
+	    port = ports[0];
+	} else {
+	    port = await navigator.serial.requestPort({ filters: usbFilter });
+	}
+	await port.open({ baudRate: 115200 });
+    } catch (e) {
+	return;
     }
-    // - Wait for the port to open.
-    await port.open({ baudRate: 115200 });
 
     const encoder = new TextEncoderStream();
     outputDone = encoder.readable.pipeTo(port.writable);
