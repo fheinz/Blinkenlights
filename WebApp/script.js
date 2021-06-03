@@ -17,6 +17,9 @@
  */
 'use strict';
 
+import "regenerator-runtime/runtime";
+import { parseGIF, decompressFrames } from "gifuct-js";
+
 let port;
 let reader;
 let inputDone;
@@ -118,7 +121,7 @@ async function clickConnect() {
   await connect();
   toggleUIConnected(true);
   if (currentImage)
-    sendImage(currentImage);
+    sendAnimation(currentImage);
   else
     sendGrid();
 }
@@ -161,25 +164,41 @@ function sendGrid() {
   writeToStream('DON', 'NXT');
 }
 
-/**
- * @name sendImage
- * Iterates over the image and generates the command to set the LEDs.
- */
-function sendImage(img) {
-  var ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0);
-  var bitmap = ctx.getImageData(0, 0, COLS, ROWS).data;
 
-  writeToStream('ANM 600000', 'FRM 1000');
-  for (var r = 0; r < ROWS; r++) {
-    var pix = [];
-    for (var c = 0; c < COLS; c++) {
-      var offset = (r * COLS + c) * 4;
-      pix.push((gammaTable[bitmap[offset]]<<16 | gammaTable[bitmap[offset+1]] << 8 | gammaTable[bitmap[offset+2]]).toString(16).padStart(6, "0"));
+/**
+ * @name sendAnimation
+ * Sends a GIF animation to the display
+ */
+function sendAnimation(img) {
+  var oReq = new XMLHttpRequest();
+  oReq.open('GET', img.src, true);
+  oReq.responseType = 'arraybuffer';
+
+  oReq.onload = function(oEvent) {
+    var arrayBuffer = oReq.response;
+    if (arrayBuffer) {
+      var gif = parseGIF(arrayBuffer);
+      var frames = decompressFrames(gif, true);
+      if (frames) {
+        writeToStream('ANM 600000');
+        frames.forEach(function(frame) {
+          var bitmap = frame.patch;
+          writeToStream('FRM ' +
+                        ('delay' in frame ? frame.delay : 1000));
+          for (var r = 0; r < ROWS; r++) {
+            var pix = [];
+            for (var c = 0; c < COLS; c++) {
+              var offset = (r * COLS + c) * 4;
+              pix.push((gammaTable[bitmap[offset]]<<16 | gammaTable[bitmap[offset+1]] << 8 | gammaTable[bitmap[offset+2]]).toString(16).padStart(6, "0"));
+           }
+           writeToStream('RGB ' + pix.join('').toUpperCase());
+          }
+        });
+        writeToStream('DON', 'NXT');
+      }
     }
-    writeToStream('RGB ' + pix.join('').toUpperCase());
   }
-  writeToStream('DON', 'NXT');
+  oReq.send(null)
 }
 
 
@@ -234,7 +253,7 @@ function initPixelArt() {
     img.crossOrigin = "Anonymous";
     ctx.drawImage(img, 0, 0);
     img.onclick = function() {
-      if (port) sendImage(img);
+      if (port) sendAnimation(img);
       currentImage = img;
     };
   });
@@ -253,16 +272,16 @@ function updateGamma() {
   let i = 0;
   gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**invGamma)));
   if (currentImage) {
-    sendImage(currentImage);
+    sendAnimation(currentImage);
   }
 }
 
 function updateColorCorrection() {
-  writeToStream('CLC ' + (
-      (Math.round(2.55*redCCSlider.value)).toString(16).padStart('0', 2) +
-	(Math.round(2.55*greenCCSlider.value)).toString(16).padStart('0', 2) +
-	(Math.round(2.55*blueCCSlider.value)).toString(16).padStart('0', 2)).
-		toUpperCase());
+  writeToStream('CLC ' +
+      ( Math.round(2.55*redCCSlider.value).toString(16).padStart('0', 2) +
+        Math.round(2.55*greenCCSlider.value).toString(16).padStart('0', 2) +
+        Math.round(2.55*blueCCSlider.value).toString(16).padStart('0', 2)
+      ).toUpperCase());
 }
 
 function initGamma() {
