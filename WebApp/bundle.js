@@ -1743,6 +1743,7 @@ function sendAnimation(img) {
 
     if (arrayBuffer) {
       var gif = (0, _gifuctJs.parseGIF)(arrayBuffer);
+      if (gif.lsd.width != ROWS || gif.lsd.height != COLS) return;
       var frames = (0, _gifuctJs.decompressFrames)(gif, true);
 
       if (frames) {
