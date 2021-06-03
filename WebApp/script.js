@@ -187,6 +187,8 @@ function sendAnimation(img) {
 	var arrayBuffer = oReq.response;
 	if (arrayBuffer) {
 	    var gif = parseGIF(arrayBuffer);
+	    if (gif.lsd.width != ROWS || gif.lsd.height != COLS)
+		return;
 	    var frames = decompressFrames(gif, true);
 	    if (frames) {
 		writeToStream('ANM 600000');
