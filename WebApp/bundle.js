@@ -1487,7 +1487,7 @@ document.addEventListener('DOMContentLoaded', function () {
  */
 
 function paddedHex(number, width) {
-  return number.toString(16).padStart(width, '0');
+  return number.toString(16).padStart(width, '0').toUpperCase();
 }
 /**
  * @name connect
@@ -1748,18 +1748,25 @@ function sendAnimation(img) {
       if (frames) {
         writeToStream('ANM 600000');
         frames.forEach(function (frame) {
-          var bitmap = frame.patch;
           writeToStream('FRM ' + ('delay' in frame ? frame.delay : 1000));
+          var pixels = Array(ROWS).fill().map(function () {
+            return Array(COLS).fill(0);
+          });
+          var bitmap = frame.patch;
+          var row_offset = frame.dims.top;
+          var col_offset = frame.dims.left;
+
+          for (var r = 0; r < frame.dims.height; r++) {
+            for (var c = 0; c < frame.dims.width; c++) {
+              var offset = (r * frame.dims.width + c) * 4;
+              pixels[r + row_offset][c + col_offset] = gammaTable[bitmap[offset]] << 16 | gammaTable[bitmap[offset + 1]] << 8 | gammaTable[bitmap[offset + 2]];
+            }
+          }
 
           for (var r = 0; r < ROWS; r++) {
-            var pix = [];
-
-            for (var c = 0; c < COLS; c++) {
-              var offset = (r * COLS + c) * 4;
-              pix.push(paddedHex(gammaTable[bitmap[offset]] << 16 | gammaTable[bitmap[offset + 1]] << 8 | gammaTable[bitmap[offset + 2]], 6));
-            }
-
-            writeToStream('RGB ' + pix.join('').toUpperCase());
+            writeToStream('RGB ' + pixels[r].map(function (p) {
+              return paddedHex(p, 6);
+            }).join(''));
           }
         });
         writeToStream('DON', 'NXT');
@@ -1866,7 +1873,7 @@ function updateGamma() {
 }
 
 function updateColorCorrection() {
-  writeToStream('CLC ' + (paddedHex(Math.round(2.55 * redCCSlider.value), 2) + paddedHex(Math.round(2.55 * greenCCSlider.value), 2) + paddedHex(Math.round(2.55 * blueCCSlider.value), 2)).toUpperCase());
+  writeToStream('CLC ' + paddedHex(Math.round(2.55 * redCCSlider.value), 2) + paddedHex(Math.round(2.55 * greenCCSlider.value), 2) + paddedHex(Math.round(2.55 * blueCCSlider.value), 2));
 }
 
 function initGamma() {
