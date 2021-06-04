@@ -204,10 +204,11 @@ function sendAnimation(img) {
 	    var frames = decompressFrames(gif, true);
 	    if (frames) {
 		writeToStream('ANM 600000');
+		var pixels = Array(ROWS).fill().map(() => Array(COLS));
 		frames.forEach(function(frame) {
 		    writeToStream('FRM ' +
 				  ('delay' in frame ? frame.delay : 1000));
-		    var pixels = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+		    pixels.forEach(row => row.fill(0));
 		    var bitmap = frame.patch;
 		    var row_offset = frame.dims.top;
 		    var col_offset = frame.dims.left;
