@@ -49,6 +49,10 @@ const greenCCSlider = document.getElementById('greenCCSlider');
 const greenCCDisplay = document.getElementById('greenCCDisplay');
 const debugButton = document.getElementById('debugButton');
 
+const usbFilter = [
+    {usbVendorId: 0x1a86, usbProductId: 0x7523}
+];
+
 document.addEventListener('DOMContentLoaded', () => {
     butConnect.addEventListener('click', clickConnect);
 
@@ -76,9 +80,17 @@ function paddedHex(number, width) {
  * output stream.
  */
 async function connect() {
-    port = await navigator.serial.requestPort();
-    // - Wait for the port to open.
-    await port.open({ baudRate: 115200 });
+    const ports = await navigator.serial.getPorts();
+    try {
+	if (ports.length == 1) {
+	    port = ports[0];
+	} else {
+	    port = await navigator.serial.requestPort({ filters: usbFilter });
+	}
+	await port.open({ baudRate: 115200 });
+    } catch (e) {
+	return;
+    }
 
     const encoder = new TextEncoderStream();
     outputDone = encoder.readable.pipeTo(port.writable);
@@ -192,10 +204,11 @@ function sendAnimation(img) {
 	    var frames = decompressFrames(gif, true);
 	    if (frames) {
 		writeToStream('ANM 600000');
+		var pixels = Array(ROWS).fill().map(() => Array(COLS));
 		frames.forEach(function(frame) {
 		    writeToStream('FRM ' +
 				  ('delay' in frame ? frame.delay : 1000));
-		    var pixels = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+		    pixels.forEach(row => row.fill(0));
 		    var bitmap = frame.patch;
 		    var row_offset = frame.dims.top;
 		    var col_offset = frame.dims.left;

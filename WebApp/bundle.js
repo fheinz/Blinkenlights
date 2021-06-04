@@ -1469,6 +1469,10 @@ var blueCCDisplay = document.getElementById('blueCCDisplay');
 var greenCCSlider = document.getElementById('greenCCSlider');
 var greenCCDisplay = document.getElementById('greenCCDisplay');
 var debugButton = document.getElementById('debugButton');
+var usbFilter = [{
+  usbVendorId: 0x1a86,
+  usbProductId: 0x7523
+}];
 document.addEventListener('DOMContentLoaded', function () {
   butConnect.addEventListener('click', clickConnect);
   var notSupported = document.getElementById('notSupported');
@@ -1507,22 +1511,52 @@ function connect() {
 
 function _connect() {
   _connect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
-    var encoder, decoder;
+    var ports, encoder, decoder;
     return regeneratorRuntime.wrap(function _callee$(_context) {
       while (1) {
         switch (_context.prev = _context.next) {
           case 0:
             _context.next = 2;
-            return navigator.serial.requestPort();
+            return navigator.serial.getPorts();
 
           case 2:
+            ports = _context.sent;
+            _context.prev = 3;
+
+            if (!(ports.length == 1)) {
+              _context.next = 8;
+              break;
+            }
+
+            port = ports[0];
+            _context.next = 11;
+            break;
+
+          case 8:
+            _context.next = 10;
+            return navigator.serial.requestPort({
+              filters: usbFilter
+            });
+
+          case 10:
             port = _context.sent;
-            _context.next = 5;
+
+          case 11:
+            _context.next = 13;
             return port.open({
               baudRate: 115200
             });
 
-          case 5:
+          case 13:
+            _context.next = 18;
+            break;
+
+          case 15:
+            _context.prev = 15;
+            _context.t0 = _context["catch"](3);
+            return _context.abrupt("return");
+
+          case 18:
             encoder = new TextEncoderStream();
             outputDone = encoder.readable.pipeTo(port.writable);
             outputStream = encoder.writable;
@@ -1534,12 +1568,12 @@ function _connect() {
             reader = inputStream.getReader();
             readLoop();
 
-          case 15:
+          case 28:
           case "end":
             return _context.stop();
         }
       }
-    }, _callee);
+    }, _callee, null, [[3, 15]]);
   }));
   return _connect.apply(this, arguments);
 }
@@ -1748,10 +1782,13 @@ function sendAnimation(img) {
 
       if (frames) {
         writeToStream('ANM 600000');
+        var pixels = Array(ROWS).fill().map(function () {
+          return Array(COLS);
+        });
         frames.forEach(function (frame) {
           writeToStream('FRM ' + ('delay' in frame ? frame.delay : 1000));
-          var pixels = Array(ROWS).fill().map(function () {
-            return Array(COLS).fill(0);
+          pixels.forEach(function (row) {
+            return row.fill(0);
           });
           var bitmap = frame.patch;
           var row_offset = frame.dims.top;
