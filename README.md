@@ -49,6 +49,8 @@ that case, running Python's default HTTP server in the WebApp directory will do:
 
 ```sh
 cd Blinkenlights/WebApp
+npm install
+npm run-script build
 python -m http.server
 ```
 
