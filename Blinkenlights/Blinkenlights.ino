@@ -16,8 +16,9 @@
  *
  */
 
+#include "BluetoothSerial.h"
 #include "FastLED.h"       // Fastled library to control the LEDs
-
+#include "Stream.h"
 
 // Pin definitions
 constexpr int kOnboardLed0Pin = 32;
@@ -68,8 +69,9 @@ constexpr float kMaxIdleCurrent = 0.5f; // Matrix + ESP32 idle
  */
 typedef uint8_t FrameIndex;
 typedef uint32_t Duration;
+typedef uint8_t FramePixels[kLedMatrixNumLeds * 3];
 typedef struct {
-  uint8_t pixels[kLedMatrixNumLeds*3];
+  FramePixels pixels;
   Duration duration;
   FrameIndex next;
 } AnimationFrame;
@@ -241,22 +243,6 @@ void DisableLEDPower() {
 UsbCurrentAvailable currentAvailable = UsbCurrentAvailable::kNone;
 UsbCurrentAvailable currentAvailableDetected = UsbCurrentAvailable::kNone;
 
-void ReportPower() {
-  switch (currentAvailable) {
-    case UsbCurrentAvailable::kNone:
-      Serial.println(F("PWR ???A"));
-      break;
-    case UsbCurrentAvailable::k3A:
-      Serial.println(F("PWR 3.0A"));
-      break;
-    case UsbCurrentAvailable::k1_5A:
-      Serial.println(F("PWR 1.5A"));
-      break;
-    default:
-      Serial.println(F("PWR 0.5A"));
-  } 
-}
-
 uint32_t PowerUpdate() {
   UsbCurrentAvailable current_advertisement = DetermineMaxCurrent();
   if (currentAvailable == current_advertisement) 
@@ -317,7 +303,10 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
     }
   
     void show(const AnimationFrame &f) {
-      const uint8_t *pixels = f.pixels;
+      show(f.pixels);
+    }
+
+    void show(const FramePixels pixels) {
       FastLED.clear();
       for (int line = 0; line < kLedMatrixNumLines; line++) {
         for (int col = 0; col < kLedMatrixNumCols; col++) {
@@ -513,7 +502,9 @@ void AnimationUpdate() {
     if (nextFrame == kFramesSentinel) {
       nextFrame = animations[liveAnimations].frames;
     }
+    return;
   }
+  display.clear();
 }
 
 void AnimationInit() {
@@ -597,150 +588,328 @@ void CloseAnimationConstruction() {
   }
 }
 
+namespace bt {
+  BluetoothSerial serial;
+  bool pair_request_pending = false;
+  bool active = false;
+  bool setup_in_progress = false;
+
+  FramePixels pair_pin_frame;
+  const FramePixels bt_logo_frame = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
+    0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
+    0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
+    0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+  };
+
+  void _draw_pair_pin_frame(uint32_t pin) {
+    // This is a font bitmask, 40x6, each digit is 4x6.
+    static const uint64_t kFont[6] = {
+      0x6666277f66LLU,
+      0x9211688199LLU,
+      0xb216a68269LLU,
+      0x9221f1f297LLU,
+      0x9241219491LLU,
+      0x67fe2e747eLLU,
+    };
+
+    // There are at least 4 digits in the pin and we draw the bottom 4.
+    // These are rows, columns and RGB color for each of the 4 digits.
+    // Digits are indexed by their weights (rightmost is 0).
+    static const int digit_start_row[4] = {9, 9, 1, 1};
+    static const int digit_start_col[4] = {10, 2, 10, 2};
+    static const uint8_t digit_rgb[12] = {
+      0x42, 0x85, 0xF4,
+      0xDB, 0x44, 0x37,
+      0xF4, 0xB4, 0x00,
+      0x0F, 0x9D, 0x58,
+    };
+
+    // Zero-out the whole image.
+    for (int r = 0; r < 16; r++) {
+      for (int c = 0; c < 16; c++) {
+        for (int rgb = 0; rgb < 3; rgb++) {
+          pair_pin_frame[(r * 16 + c) * 3 + rgb] = 0;
+        }
+      }
+    }
+
+    // Cut out digit by digit from the right and draw it.
+    for (int digit_idx = 0; digit_idx < 4; digit_idx++) {
+      int d = pin % 10;
+      pin /= 10;
+      for (int digit_row = 0; digit_row < 6; ++digit_row) {
+        int row = digit_start_row[digit_idx] + digit_row;
+        uint64_t mask = 1LLU << ((9 - d) * 4 + 3);
+        for (int digit_col = 0; digit_col < 4; ++digit_col) {
+          int col = digit_start_col[digit_idx] + digit_col;
+          if (mask & kFont[digit_row]) {
+            for (int rgb = 0; rgb < 3; rgb++) {
+              pair_pin_frame[(row * 16 + col) * 3 + rgb] =
+                  digit_rgb[digit_idx * 3 + rgb];
+            }
+          }
+          mask >>= 1;
+        }
+      }
+    }
+  }
+
+  void _pair_confirm_request_callback(uint32_t pin) {
+    _draw_pair_pin_frame(pin);
+    pair_request_pending = true;
+  }
+
+  void _pair_complete_callback(bool success) {
+    pair_request_pending = false;
+    active = success;
+    setup_in_progress = !success;
+    if (success) {
+      Serial.flush();
+    }
+  }
+
+  void Setup() {
+    serial.enableSSP();
+    serial.onConfirmRequest(_pair_confirm_request_callback);
+    serial.onAuthComplete(_pair_complete_callback);
+    serial.begin("Blinky");
+    setup_in_progress = true;
+  }
+
+  void PairAccept() {
+    serial.confirmReply(true);
+  }
+}  // namespace bt
+
+// Stream picking function. If bluetooth is active, it takes precedence.
+inline Stream& Comm() {
+  if (bt::active) {
+    return bt::serial;
+  }
+  return Serial;
+}
+
+void ReportPower() {
+  switch (currentAvailable) {
+    case UsbCurrentAvailable::kNone:
+      Comm().println(F("PWR ???A"));
+      break;
+    case UsbCurrentAvailable::k3A:
+      Comm().println(F("PWR 3.0A"));
+      break;
+    case UsbCurrentAvailable::k1_5A:
+      Comm().println(F("PWR 1.5A"));
+      break;
+    default:
+      Comm().println(F("PWR 0.5A"));
+  }
+}
+
 void ProcessCommand() {
   int l = bufP-inputBuffer;
   if (lineTooLong) {
-    Serial.println(F("NAK LIN"));
+    Comm().println(F("NAK LIN"));
     return;
   }
   if (l > 4) {
     if (!strncmp((const char *)F("CLC "), inputBuffer, 4)) {
       CRGB c;
       if (!ParseHex((uint8_t *)&c, inputBuffer+4, bufP)) {
-        Serial.println(F("NAK CLC ARG"));
+        Comm().println(F("NAK CLC ARG"));
         return;
       }
       FastLED.setCorrection(c);
-      Serial.print(F("ACK CLC "));
-      Serial.print(c.red, HEX);
-      Serial.print(c.green, HEX);
-      Serial.println(c.blue, HEX);
+      Comm().print(F("ACK CLC "));
+      Comm().print(c.red, HEX);
+      Comm().print(c.green, HEX);
+      Comm().println(c.blue, HEX);
       return;
     }
     if (!strncmp("DIM ", inputBuffer, 4)) {
       uint32_t b;
       if (!ParseUInt32(&b, inputBuffer+4, bufP) || b > 255) {
-        Serial.println(F("NAK DIM ARG"));
+        Comm().println(F("NAK DIM ARG"));
         return;
       }
       FastLED.setBrightness(b);
-      Serial.print(F("ACK DIM "));
-      Serial.print(b);
+      Comm().print(F("ACK DIM "));
+      Comm().print(b);
       return;
     }
     if (!strncmp("DTH ", inputBuffer, 4)) {
       if (l == 6 && !strncmp("ON", inputBuffer+4, 2)) {
         FastLED.setDither(BINARY_DITHER);       
-        Serial.println(F("ACK DTH ON"));
+        Comm().println(F("ACK DTH ON"));
         return;
       }
       if (l == 7 && !strncmp("OFF", inputBuffer+4, 3)) {
         FastLED.setDither(DISABLE_DITHER);
-        Serial.println(F("ACK DTH OFF"));
+        Comm().println(F("ACK DTH OFF"));
         return;
       }
-      Serial.println(F("NAK DTH ARG"));
+      Comm().println(F("NAK DTH ARG"));
       return;
     }
     if (!strncmp("RGB ", inputBuffer, 4)) {
       if (frameInProgress == kFramesSentinel) {
-        Serial.println(F("NAK RGB NFM"));
+        Comm().println(F("NAK RGB NFM"));
         return;
       }
       if (frameInProgressLine >= kLedMatrixNumLines) {
-        Serial.println(F("NAK RGB OFL"));
+        Comm().println(F("NAK RGB OFL"));
         return;        
       }
       if (l != 100 || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
-        Serial.println(F("NAK RGB ARG"));
+        Comm().println(F("NAK RGB ARG"));
         return;
       }
-      Serial.print(F("ACK RGB "));
-      Serial.println(frameInProgressLine);
+      Comm().print(F("ACK RGB "));
+      Comm().println(frameInProgressLine);
       frameInProgressLine++;
       return;
     }
     if (!strncmp("FRM ", inputBuffer, 4)) {
       Duration d;
       if (!ParseUInt32(&d, inputBuffer+4, bufP)) {
-        Serial.println(F("NAK FRM ARG"));
+        Comm().println(F("NAK FRM ARG"));
         return;
       }
       CloseFrameConstruction();
       frameInProgress = FramesGetFrame();    
       if (frameInProgress == kFramesSentinel) {
-        Serial.println(F("NAK FRM UFL"));
+        Comm().println(F("NAK FRM UFL"));
         return;
       }
       frames[frameInProgress].duration = d;
-      Serial.print(F("ACK FRM "));
-      Serial.println(d);
+      Comm().print(F("ACK FRM "));
+      Comm().println(d);
       return;   
     }
     if (!strncmp("ANM ", inputBuffer, 4)) {
       Duration d;
       if (!ParseUInt32(&d, inputBuffer+4, bufP)) {
-        Serial.println(F("NAK ANM ARG"));
+        Comm().println(F("NAK ANM ARG"));
         return;
       }
       CloseAnimationConstruction();
       animationInProgress = AnimationsGetAnimation();
       if (animationInProgress == kAnimationsSentinel) {
-        Serial.println(F("NAK ANM UFL"));
+        Comm().println(F("NAK ANM UFL"));
         return;
       }
       animations[animationInProgress].duration = d;
-      Serial.print(F("ACK ANM "));
-      Serial.println(d);
+      Comm().print(F("ACK ANM "));
+      Comm().println(d);
       return;   
     }
   }
   if (l == 3) {
     if (!strncmp("VER", inputBuffer, 3)) {
-      Serial.println(F("ACK VER 1.0"));
+      Comm().println(F("ACK VER 1.0"));
       return;
     }
     if (!strncmp("PWR", inputBuffer, 3)) {
-      Serial.print(F("ACK "));
+      Comm().print(F("ACK "));
       ReportPower();
       return;
     }
     if (!strncmp("QUE", inputBuffer, 3)) {
       AnimationIndex a = liveAnimations;
-      Serial.print(F("ACK QUE"));
+      Comm().print(F("ACK QUE"));
       if (a != kAnimationsSentinel) {
-        Serial.print(F(" ("));
-        Serial.print(animations[a].duration-animationClock);
-        Serial.print(F(", "));
-        Serial.print(FramesCountFrames(animations[a].frames));
-        Serial.print(F(")"));
+        Comm().print(F(" ("));
+        Comm().print(animations[a].duration-animationClock);
+        Comm().print(F(", "));
+        Comm().print(FramesCountFrames(animations[a].frames));
+        Comm().print(F(")"));
         a = animations[a].next;
       }
       while (a != kAnimationsSentinel) {
-        Serial.print(F(" ("));
-        Serial.print(animations[a].duration);
-        Serial.print(F(", "));
-        Serial.print(FramesCountFrames(animations[a].frames));
-        Serial.print(F(")"));
+        Comm().print(F(" ("));
+        Comm().print(animations[a].duration);
+        Comm().print(F(", "));
+        Comm().print(FramesCountFrames(animations[a].frames));
+        Comm().print(F(")"));
         a = animations[a].next;
       }
-      Serial.println();
+      Comm().println();
       return;
     }
     if (!strncmp("FRE", inputBuffer, 3)) {
-      Serial.print(F("ACK FRE "));
-      Serial.print(numFreeAnimations);
-      Serial.print(F(" "));
-      Serial.println(numFreeFrames);
+      Comm().print(F("ACK FRE "));
+      Comm().print(numFreeAnimations);
+      Comm().print(F(" "));
+      Comm().println(numFreeFrames);
       return;
     }
     if (!strncmp("DON", inputBuffer, 3)) {
       if (animationInProgress == kAnimationsSentinel) {
-        Serial.println(F("NAK DON NOA"));
+        Comm().println(F("NAK DON NOA"));
         return;
       }
       CloseAnimationConstruction();
-      Serial.println(F("ACK DON ANM"));
+      Comm().println(F("ACK DON ANM"));
       return;
     }
     if (!strncmp("RST", inputBuffer, 3)) {
@@ -750,39 +919,39 @@ void ProcessCommand() {
       }
       AnimationInit();
       display.clear();
-      Serial.println(F("ACK RST"));
+      Comm().println(F("ACK RST"));
       return;
     }
     if (!strncmp("NXT", inputBuffer, 3)) {
       if (numLiveAnimations > 1) {
         skipToNextAnimation = true;
       }
-      Serial.println(F("ACK NXT"));
+      Comm().println(F("ACK NXT"));
       return;
     }
     if (!strncmp("DBG", inputBuffer, 3)) {
-      Serial.print(F("animationInProgress: ")); Serial.println(animationInProgress);
-      Serial.print(F("frameInProgress: ")); Serial.println(frameInProgress);
-      Serial.print(F("frameInProgressLine: ")); Serial.println(frameInProgressLine);
-      Serial.print(F("freeAnimations:"));
+      Comm().print(F("animationInProgress: ")); Comm().println(animationInProgress);
+      Comm().print(F("frameInProgress: ")); Comm().println(frameInProgress);
+      Comm().print(F("frameInProgressLine: ")); Comm().println(frameInProgressLine);
+      Comm().print(F("freeAnimations:"));
       for (AnimationIndex a = freeAnimations; a != kAnimationsSentinel; a = animations[a].next) {
-        Serial.print(F(" ")); Serial.print(a);
+        Comm().print(F(" ")); Comm().print(a);
       }
-      Serial.println();
-      Serial.print(F("liveAnimations:"));
+      Comm().println();
+      Comm().print(F("liveAnimations:"));
       for (AnimationIndex a = liveAnimations; a != kAnimationsSentinel; a = animations[a].next) {
-        Serial.print(F(" ")); Serial.print(a);
+        Comm().print(F(" ")); Comm().print(a);
       }
-      Serial.println();
-      Serial.print(F("freeFrames:"));
+      Comm().println();
+      Comm().print(F("freeFrames:"));
       for (FrameIndex f = freeFrames; f != kFramesSentinel; f = frames[f].next) {
-        Serial.print(F(" ")); Serial.print(f);
+        Comm().print(F(" ")); Comm().print(f);
       }
-      Serial.println();
+      Comm().println();
       return;
     }
   }
-  Serial.println(F("NAK CMD"));
+  Comm().println(F("NAK CMD"));
 }
 
 void SerialInit() {
@@ -796,24 +965,44 @@ void SerialInit() {
   frameInProgressLine = 0;  
 }
 
-void SerialUpdate() {
-  if (Serial) {
-    while (Serial.available()) {
-      int c = Serial.read();
-      if (c == '\n') {
-        if (bufP != inputBuffer) {
-          ProcessCommand();
-        }
-        bufP = inputBuffer;
-        lineTooLong = false;
-      } else if (bufP - inputBuffer < sizeof(inputBuffer)) {
-          *bufP++ = c;
-      } else {
-        lineTooLong = true;
+void CommsUpdate() {
+  while (Comm().available()) {
+    int c = Comm().read();
+    if (c == '\n') {
+      if (bufP != inputBuffer) {
+        ProcessCommand();
       }
+      bufP = inputBuffer;
+      lineTooLong = false;
+    } else if (bufP - inputBuffer < sizeof(inputBuffer)) {
+        *bufP++ = c;
+    } else {
+      lineTooLong = true;
     }
   }
 }
+
+// Debouncing touch button controller.
+template <int kInputPin>
+class TouchButtonControler {
+ public:
+  TouchButtonControler()
+      : filtered_value_(static_cast<float>(touchRead(kInputPin))) {}
+
+  void Update() {
+    filtered_value_ *= kFilterStrength;
+    filtered_value_ += (1.0f - kFilterStrength) * touchRead(kInputPin);
+  }
+
+  bool Pressed() const {
+    return filtered_value_ < kPressThreshold;
+  }
+
+ private:
+  static constexpr float kFilterStrength = 0.7f;
+  static constexpr float kPressThreshold = 20.0f;
+  float filtered_value_;
+};
 
 /*
  * And the usual Arduino song and dance.
@@ -835,11 +1024,47 @@ void setup() {
 }
 
 void loop() {
-  uint32_t loop_epoch = millis(); 
-  animationClock = loop_epoch - animationEpoch;
+  uint32_t loop_epoch = millis();
   uint32_t next_loop = PowerUpdate();
-  AnimationUpdate();
-  SerialUpdate();
+
+  // Handle button presses.
+  static TouchButtonControler<kTouch0Pin> button_0;
+  static TouchButtonControler<kTouch1Pin> button_1;
+  static TouchButtonControler<kTouch2Pin> button_2;
+  static uint32_t btn_not_all_pressed_time = millis();
+
+  button_0.Update();
+  button_1.Update();
+  button_2.Update();
+
+  int btn_num_pressed = 0;
+  if (button_0.Pressed()) btn_num_pressed++;
+  if (button_1.Pressed()) btn_num_pressed++;
+  if (button_2.Pressed()) btn_num_pressed++;
+
+  if (btn_num_pressed < 3) {
+    btn_not_all_pressed_time = loop_epoch;
+  } else if (loop_epoch - btn_not_all_pressed_time > 3000 &&
+             !bt::setup_in_progress &&
+             !bt::active) {
+    bt::Setup();
+  }
+
+  if (bt::setup_in_progress) {
+    if (bt::pair_request_pending) {
+      display.show(bt::pair_pin_frame);
+      
+      if (btn_num_pressed == 1) {
+        bt::PairAccept();
+      }
+    } else {
+      display.show(bt::bt_logo_frame);
+    }
+  } else {
+    animationClock = loop_epoch - animationEpoch;
+    AnimationUpdate();
+    CommsUpdate();
+  }
   
   // USB-C spec says the host can change the advertised current limit at any time,
   // and we have tSinkAdj(max) (60ms) to comply.
