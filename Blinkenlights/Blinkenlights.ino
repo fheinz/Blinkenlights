@@ -502,9 +502,7 @@ void AnimationUpdate() {
     if (nextFrame == kFramesSentinel) {
       nextFrame = animations[liveAnimations].frames;
     }
-//    return;
   }
-//  display.clear();
 }
 
 void AnimationInit() {
