@@ -18,23 +18,19 @@
 import argparse
 import blinken
 import sys
+import time
 
+from PIL import Image, ImageColor, ImageDraw
 
 def parse_args(args):
     parser = argparse.ArgumentParser(
-        description='Upload 16x16 PNGs to blinkenlights board.')
-    parser.add_argument('png_file',
-        type=str, nargs='+',
-        help='Path to a 16x16 PNG.')
+        description='Draw an animated square rainbow.')
     parser.add_argument('-v', '--verbose',
         type=bool, default=False, action=argparse.BooleanOptionalAction,
         help='Print data sent to / received from the board.')
     parser.add_argument('-r', '--reset',
         type=bool, default=True, action=argparse.BooleanOptionalAction,
         help='Reset data stored on board before sending new data.')
-    parser.add_argument('-l', '--loop',
-        type=int, default=1, metavar='COUNT',
-        help='Loop provided PNGs COUNT times. (default: %(default)s)')
     parser.add_argument('-t', '--time',
         type=int, default=1000, metavar='TIME',
         help='Display each frame for TIME ms. (default: %(default)s)')
@@ -51,6 +47,18 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
+colours = [
+    ImageColor.getrgb('#000000'),
+    ImageColor.getrgb('#7f00ff'),
+    ImageColor.getrgb('#00007f'),
+    ImageColor.getrgb('#007fff'),
+    ImageColor.getrgb('#00ff00'),
+    ImageColor.getrgb('#ffff00'),
+    ImageColor.getrgb('#ff7f00'),
+    ImageColor.getrgb('#ff0000'),
+]
+
+
 def main():
     args = parse_args(sys.argv[1:])
     bl = blinken.Blinken(
@@ -62,11 +70,27 @@ def main():
     if args.reset:
         bl.command("RST")
 
-    frames = len(args.png_file)
-    with bl.animation(args.time * frames * args.loop):
-        for frame, png_file in enumerate(args.png_file):
-            bl.frame_from_png(png_file, args.time)
-            print(f"Wrote frame {frame+1} of {frames}")
+    blank = Image.new(mode='RGB', size=(16, 16))
+    with bl.animation(1000):
+        bl.frame_from_image(blank, 1000)
+    frame = 0
+    start = time.clock_gettime(time.CLOCK_MONOTONIC)
+    while True:
+        buf = blank.copy()
+        draw = ImageDraw.Draw(buf)
+        for i, colour in enumerate(colours):
+            size = (frame+i) % 8
+            draw.rectangle([7-size,7-size,8+size,8+size], outline=colour)
+        with bl.animation(1000):
+            bl.frame_from_image(buf, 1000)
+        bl.command('NXT')
+        frame += 1
+        # It takes around 650ms to create an animation, upload a frame, and
+        # switch out from the last uploaded animation.
+        frametime = (start + ((args.time/1000)*frame)) - time.clock_gettime(time.CLOCK_MONOTONIC)
+        if frametime < 0:
+            continue
+        time.sleep(frametime)
 
 
 if __name__ == '__main__':
