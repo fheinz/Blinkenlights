@@ -19,6 +19,7 @@
 #include "BluetoothSerial.h"
 #include "FastLED.h"       // Fastled library to control the LEDs
 #include "Stream.h"
+#include <Preferences.h>
 
 // Pin definitions
 constexpr int kOnboardLed0Pin = 32;
@@ -32,6 +33,7 @@ constexpr int kTouch0Pin = 15;
 constexpr int kTouch1Pin = 2;
 constexpr int kTouch2Pin = 4;
 
+Preferences preferences;
 
 enum class UsbCurrentAvailable {
   // Current available unknown
@@ -202,7 +204,27 @@ float AnalogReadV(int pin) {
  * Voltage thresholds from Table 4-36:
  * >0.2V = connected, >0.66V = 1.5A, >1.23V = 3A. 
  */
+UsbCurrentAvailable PowerOverride = UsbCurrentAvailable::kNone;
+constexpr char PowerOverridePrefsKey[] = "PowerOverride";
+
+void SetPowerOverride(UsbCurrentAvailable c) {
+  PowerOverride = c;
+  preferences.putUInt(PowerOverridePrefsKey, (uint8_t)c);
+}
+
+void ResetPowerOverride() {
+  preferences.remove(PowerOverridePrefsKey);
+  PowerOverride = UsbCurrentAvailable::kNone;
+}
+
+void GetPowerOverride() {
+  PowerOverride = (UsbCurrentAvailable)preferences.getUInt(
+    PowerOverridePrefsKey, (uint8_t)UsbCurrentAvailable::kNone);
+}
+
 UsbCurrentAvailable DetermineMaxCurrent() {
+  if (PowerOverride != UsbCurrentAvailable::kNone)
+    return PowerOverride;
   float cc1 = AnalogReadV(kUsbCc1Pin);
   float cc2 = AnalogReadV(kUsbCc2Pin);
   float cc = max(cc1, cc2);
@@ -269,7 +291,6 @@ uint32_t PowerUpdate() {
         DisableLEDPower();
     }
     currentAvailable = current_advertisement;
-    ReportPower();
   done:
     currentAvailableDetected = UsbCurrentAvailable::kNone;
     return 30;
@@ -748,8 +769,8 @@ inline Stream& Comm() {
   return Serial;
 }
 
-void ReportPower() {
-  switch (currentAvailable) {
+void ReportPower(UsbCurrentAvailable pwr) {
+  switch (pwr) {
     case UsbCurrentAvailable::kNone:
       Comm().println(F("PWR ???A"));
       break;
@@ -861,6 +882,24 @@ void ProcessCommand() {
       Comm().println(d);
       return;   
     }
+    if (!strncmp("PWR ", inputBuffer, 4)) {
+      if (!strncmp("RST", inputBuffer+4, 3)) {
+        ResetPowerOverride();
+      } else if (!strncmp("3.0A", inputBuffer+4, 4)) {
+        SetPowerOverride(UsbCurrentAvailable::k3A);
+      } else if (!strncmp("1.5A", inputBuffer+4, 4)) {
+        SetPowerOverride(UsbCurrentAvailable::k1_5A);
+      } else if (!strncmp("0.5A", inputBuffer+4, 4)) {
+        SetPowerOverride(UsbCurrentAvailable::kUsbStd);
+      } else {
+        Comm().println(F("NAK PWR ARG"));
+        return;
+      }
+      Comm().print(F("ACK "));
+      ReportPower(PowerOverride);
+      return;
+    }
+    return;
   }
   if (l == 3) {
     if (!strncmp("VER", inputBuffer, 3)) {
@@ -869,7 +908,7 @@ void ProcessCommand() {
     }
     if (!strncmp("PWR", inputBuffer, 3)) {
       Comm().print(F("ACK "));
-      ReportPower();
+      ReportPower(currentAvailable);
       return;
     }
     if (!strncmp("QUE", inputBuffer, 3)) {
@@ -1014,6 +1053,8 @@ void setup() {
   pinMode(kTouch0Pin, INPUT);
   pinMode(kTouch1Pin, INPUT);
   pinMode(kTouch2Pin, INPUT);
+  preferences.begin("Blinkenlights", false);
+  GetPowerOverride();
   display.clear();
   FramesReset();
   AnimationsReset();
