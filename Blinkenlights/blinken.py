@@ -42,6 +42,9 @@ class Blinken(object):
 
     def command(self, cmd):
         self.write(cmd)
+        return self.check()
+
+    def check(self):
         rsp = self.read().split(maxsplit=1)
         if rsp[0] == 'NAK':
             self.write('RST')
@@ -50,11 +53,25 @@ class Blinken(object):
             sys.exit(1)
         return rsp[1]
 
+    def commands(self, cmds):
+        # Send all commands before checking any results.
+        for cmd in cmds:
+            self.write(cmd)
+        for cmd in cmds:
+            self.check()
+
     @contextlib.contextmanager
-    def animation(self, ms):
-        self.command(f'ANM {ms}')
-        yield self
-        self.command('DON')
+    def animation(self, ms, start_next=False):
+        anim = Animation(ms, start_next, self._gamma_table)
+        yield anim
+        anim.render(self)
+
+
+class Animation(object):
+    def __init__(self, ms, start_next, gamma_table):
+        self._cmdlist = [f'ANM {ms}']
+        self._next = start_next
+        self._gamma_table = gamma_table
 
     def frame_from_png(self, png_file, ms):
         image = Image.open(png_file).convert(mode='RGB')
@@ -66,7 +83,7 @@ class Blinken(object):
         if image.mode != 'RGB':
             raise ValueError(f'image is {image.mode} not RGB')
 
-        self.command(f"FRM {ms}")
+        self._cmdlist.append(f"FRM {ms}")
 
         data = image.tobytes()
         for line in range(16):
@@ -74,6 +91,11 @@ class Blinken(object):
             for byte in data[3*16*line:3*16*(line+1)]:
                 corrected = self._gamma_table[byte]
                 rgb += f'{corrected:02X}'
-            self.command(f'RGB {rgb}')
+            self._cmdlist.append(f'RGB {rgb}')
 
+    def render(self, blinken):
+        self._cmdlist.append("DON")
+        if self._next:
+            self._cmdlist.append("NXT")
+        blinken.commands(self._cmdlist)
 
