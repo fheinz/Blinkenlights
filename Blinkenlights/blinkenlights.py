@@ -13,38 +13,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# An exceedingly crude script to upload a bunch of png files to the matrix.
+# A script to upload a bunch of png files to the matrix.
 
-import png
-import serial
+import argparse
+import blinken
 import sys
 
-if len(sys.argv) < 3 :
-    print("Usage: %s <gamma> <16x16 png file>..."%sys.argv[0], file=sys.stderr, );
-    exit(1)
 
-_InvGamma = 1/float(sys.argv[1])
-GammaLUT = [int(round(255*((v/255.0)**_InvGamma))) for v in range(256)]
+def parse_args(args):
+    parser = argparse.ArgumentParser(
+        description='Upload 16x16 PNGs to blinkenlights board.')
+    parser.add_argument('png_file',
+        type=str, nargs='+',
+        help='Path to a 16x16 PNG.')
+    parser.add_argument('-v', '--verbose',
+        type=bool, default=False, action=argparse.BooleanOptionalAction,
+        help='Print data sent to / received from the board.')
+    parser.add_argument('-r', '--reset',
+        type=bool, default=True, action=argparse.BooleanOptionalAction,
+        help='Reset data stored on board before sending new data.')
+    parser.add_argument('-l', '--loop',
+        type=int, default=1, metavar='COUNT',
+        help='Loop provided PNGs COUNT times. (default: %(default)s)')
+    parser.add_argument('-t', '--time',
+        type=int, default=1000, metavar='TIME',
+        help='Display each frame for TIME ms. (default: %(default)s)')
+    parser.add_argument('-g', '--gamma',
+        type=float, default=0.7, metavar='GAMMA',
+        help='Apply GAMMA correction to PNG. (default: %(default)s)')
+    parser.add_argument('-d', '--device',
+        type=str, default='/dev/ttyUSB0', metavar='DEVICE',
+        help='Use DEVICE to talk to board. (default: %(default)s)')
+    parser.add_argument('-s', '--speed',
+        type=int, default=115200, metavar='SPEED',
+        help='Connect serial device at SPEED bps. (default: %(default)s)')
 
-Serial = serial.Serial('/dev/ttyACM0', 9600)
+    return parser.parse_args(args)
 
-while True:
-    Serial.write("VER\n".encode())
-    l = Serial.readline()
-    print(l);
-    if l == b"ACK VER 1.0\r\n":
-        break
-Serial.write("ANM 600000\n".encode())
-print(Serial.readline())
 
-for png_file in sys.argv[2:]:
-    (width, height, rows, meta) = png.Reader(file=open(png_file, "rb")).asRGB8()
-    Serial.write("FRM 1000\n".encode())
-    print(Serial.readline())
-    for r in rows:
-        Serial.write(("RGB %s\n"%"".join("%02X"%GammaLUT[v] for v in r)).encode())
-        print(Serial.readline())
-Serial.write("DON\n".encode())
-print(Serial.readline())
-Serial.write("QUE\n".encode())
-print(Serial.readline())
+def main():
+    args = parse_args(sys.argv[1:])
+    bl = blinken.Blinken(
+        gamma=args.gamma,
+        debug=args.verbose,
+        dev=args.device,
+        speed=args.speed)
+
+    if args.reset:
+        bl.command("RST")
+
+    frames = len(args.png_file)
+    with bl.animation(args.time * frames * args.loop):
+        for frame, png_file in enumerate(args.png_file):
+            bl.frame_from_png(png_file, args.time)
+            print(f"Wrote frame {frame+1} of {frames}")
+
+
+if __name__ == '__main__':
+    main()
