@@ -49,12 +49,12 @@ def parse_args(args):
 
 colours = [
     ImageColor.getrgb('#000000'),
-    ImageColor.getrgb('#7f00ff'),
+    ImageColor.getrgb('#3f00ff'),
     ImageColor.getrgb('#00007f'),
     ImageColor.getrgb('#007fff'),
     ImageColor.getrgb('#00ff00'),
     ImageColor.getrgb('#ffff00'),
-    ImageColor.getrgb('#ff7f00'),
+    ImageColor.getrgb('#ff3f00'),
     ImageColor.getrgb('#ff0000'),
 ]
 
@@ -71,8 +71,8 @@ def main():
         bl.command("RST")
 
     blank = Image.new(mode='RGB', size=(16, 16))
-    with bl.animation(1000):
-        bl.frame_from_image(blank, 1000)
+    with bl.animation(1000) as anim:
+        anim.frame_from_image(blank, 1000)
     frame = 0
     start = time.clock_gettime(time.CLOCK_MONOTONIC)
     while True:
@@ -81,11 +81,10 @@ def main():
         for i, colour in enumerate(colours):
             size = (frame+i) % 8
             draw.rectangle([7-size,7-size,8+size,8+size], outline=colour)
-        with bl.animation(1000):
-            bl.frame_from_image(buf, 1000)
-        bl.command('NXT')
+        with bl.animation(1000, start_next=True) as anim:
+            anim.frame_from_image(buf, 1000)
         frame += 1
-        # It takes around 650ms to create an animation, upload a frame, and
+        # It takes around 180ms to create an animation, upload a frame, and
         # switch out from the last uploaded animation.
         frametime = (start + ((args.time/1000)*frame)) - time.clock_gettime(time.CLOCK_MONOTONIC)
         if frametime < 0:
