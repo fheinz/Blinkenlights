@@ -582,7 +582,7 @@ void AnimationInit() {
  *   --> RST
  *   <-- ACK RST
  */
-#define BUFLEN 150
+#define BUFLEN 100
 char inputBuffer[BUFLEN];
 char *bufP;
 bool lineTooLong;
