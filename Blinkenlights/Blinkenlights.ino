@@ -839,7 +839,7 @@ void ProcessCommand() {
         Comm().println(F("NAK RGB OFL"));
         return;        
       }
-      if (l != 100 || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
+      if (l != BUFLEN || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
         Comm().println(F("NAK RGB ARG"));
         return;
       }
