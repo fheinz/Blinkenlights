@@ -24,7 +24,7 @@ from PIL import Image, ImageColor, ImageDraw
 
 def parse_args(args):
     parser = argparse.ArgumentParser(
-        description='Draw an animated square rainbow.')
+        description='Draw a clock showing the current time.')
     parser.add_argument('-v', '--verbose',
         type=bool, default=False, action=argparse.BooleanOptionalAction,
         help='Print data sent to / received from the board.')
@@ -47,16 +47,89 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
-colours = [
-    ImageColor.getrgb('#000000'),
-    ImageColor.getrgb('#3f00ff'),
-    ImageColor.getrgb('#0000ff'),
-    ImageColor.getrgb('#007fff'),
-    ImageColor.getrgb('#00ff00'),
-    ImageColor.getrgb('#ffff00'),
-    ImageColor.getrgb('#ff3f00'),
-    ImageColor.getrgb('#ff0000'),
-]
+class Clock(object):
+    """Draws a full-width clock to a PIL image at a specified Y offset."""
+    # HHMM character x offset in px.
+    # Static because we need the entire width to fit 4 5x3 chars.
+    x_offsets = [0,4,9,13]
+
+    numbers = [
+        blinken.Bitmap(
+            ".w.",
+            "w w",
+            "w w",
+            "w w",
+            ".w."),
+        blinken.Bitmap(
+            " w ",
+            "ww ",
+            " w ",
+            " w ",
+            "www"),
+        blinken.Bitmap(
+            "ww ",
+            "  w",
+            " w ",
+            "w  ",
+            "www"),
+        blinken.Bitmap(
+            "www",
+            "  w",
+            " ww",
+            "  w",
+            "www"),
+        blinken.Bitmap(
+            "w w",
+            "w w",
+            "www",
+            "  w",
+            "  w"),
+        blinken.Bitmap(
+            "wwW",
+            "w  ",
+            "ww ",
+            "  w",
+            "ww "),
+        blinken.Bitmap(
+            "www",
+            "w  ",
+            "www",
+            "w w",
+            "www"),
+        blinken.Bitmap(
+            "www",
+            "  w",
+            " w ",
+            " w ",
+            " w "),
+        blinken.Bitmap(
+            "www",
+            "w w",
+            "www",
+            "w w",
+            "www"),
+        blinken.Bitmap(
+            "www",
+            "w w",
+            "www",
+            "  w",
+            "www"),
+    ]
+    mid_dot = blinken.Bitmap("pp", "  ", "pp")
+    mid_dot_x = 7
+
+    def __init__(self, y_offset=6):
+        self.y_offset =  y_offset
+
+    def Draw(self, draw):
+        _, _, _, h, m, s, _, _, _ = time.localtime()
+
+        for i, n in enumerate(divmod(h, 10) + divmod(m, 10)):
+            num = self.numbers[n]
+            num.Blit(draw, (self.x_offsets[i], self.y_offset))
+
+        if s % 2:
+            self.mid_dot.Blit(draw, (self.mid_dot_x, self.y_offset+1))
 
 
 def main():
@@ -75,22 +148,16 @@ def main():
     if args.reset:
         bl.command("RST")
 
-    blank = Image.new(mode='RGB', size=(16, 16))
-    with bl.animation(1000) as anim:
-        anim.frame_from_image(blank, 1000)
     frame = 0
     start = time.clock_gettime(time.CLOCK_MONOTONIC)
+    clock = Clock()
     while True:
-        buf = blank.copy()
+        buf = Image.new(mode='RGB', size=(16, 16))
         draw = ImageDraw.Draw(buf)
-        for i, colour in enumerate(colours):
-            size = (frame+i) % 8
-            draw.rectangle([7-size,7-size,8+size,8+size], outline=colour)
+        clock.Draw(draw)
         with bl.animation(1000, start_next=True) as anim:
             anim.frame_from_image(buf, 1000)
         frame += 1
-        # It takes around 180ms to create an animation, upload a frame, and
-        # switch out from the last uploaded animation.
         frametime = (start + ((args.time/1000)*frame)) - time.clock_gettime(time.CLOCK_MONOTONIC)
         if frametime < 0:
             continue
