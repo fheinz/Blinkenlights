@@ -705,10 +705,10 @@ namespace bt {
     };
 
     // Zero-out the whole image.
-    for (int r = 0; r < 16; r++) {
-      for (int c = 0; c < 16; c++) {
+    for (int r = 0; r < kLedMatrixNumLines; r++) {
+      for (int c = 0; c < kLedMatrixNumCols; c++) {
         for (int rgb = 0; rgb < 3; rgb++) {
-          pair_pin_frame[(r * 16 + c) * 3 + rgb] = 0;
+          pair_pin_frame[(r * kLedMatrixNumCols + c) * 3 + rgb] = 0;
         }
       }
     }
@@ -724,7 +724,7 @@ namespace bt {
           int col = digit_start_col[digit_idx] + digit_col;
           if (mask & kFont[digit_row]) {
             for (int rgb = 0; rgb < 3; rgb++) {
-              pair_pin_frame[(row * 16 + col) * 3 + rgb] =
+              pair_pin_frame[(row * kLedMatrixNumCols + col) * 3 + rgb] =
                   digit_rgb[digit_idx * 3 + rgb];
             }
           }
@@ -839,7 +839,7 @@ void ProcessCommand() {
         Comm().println(F("NAK RGB OFL"));
         return;        
       }
-      if (l != 100 || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
+      if (l != BUFLEN || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
         Comm().println(F("NAK RGB ARG"));
         return;
       }
