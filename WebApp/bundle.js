@@ -1469,6 +1469,7 @@ var blueCCDisplay = document.getElementById('blueCCDisplay');
 var greenCCSlider = document.getElementById('greenCCSlider');
 var greenCCDisplay = document.getElementById('greenCCDisplay');
 var debugButton = document.getElementById('debugButton');
+var clockButton = document.getElementById('clockButton');
 var usbFilter = [{
   usbVendorId: 0x1a86,
   usbProductId: 0x7523
@@ -1483,6 +1484,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   debugButton.onclick = function () {
     if (port) writeToStream('DBG');
+  };
+
+  clockButton.onclick = function () {
+    drawClockMinute('FFFFFF', '000000', '0000FF');
   };
 });
 /**
@@ -1969,6 +1974,46 @@ function toggleUIConnected(connected) {
 
     cb.setAttribute('disabled', true);
   });
+}
+
+var DIGIT_ROWS = 5;
+var CLOCK_VERTICAL_OFFSET = 5;
+var Digits = [[[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]], [[0, 1, 0], [1, 1, 0], [0, 1, 0], [0, 1, 0], [1, 1, 1]], [[1, 1, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], [1, 1, 1]], [[1, 1, 1], [0, 0, 1], [0, 1, 1], [0, 0, 1], [1, 1, 1]], [[1, 0, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [0, 0, 1]], [[1, 1, 1], [1, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 0]], [[1, 1, 1], [1, 0, 0], [1, 1, 1], [1, 0, 1], [1, 1, 1]], [[1, 1, 1], [0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 1, 0]], [[1, 1, 1], [1, 0, 1], [1, 1, 1], [1, 0, 1], [1, 1, 1]], [[1, 1, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [1, 1, 1]]];
+
+function digitRow(d, row, fg, bg) {
+  return Digits[d][row].map(function (p) {
+    return p ? fg : bg;
+  }).join('');
+}
+
+function drawClockMinute(fg, bg, colon) {
+  var t = new Date();
+  var hours = t.getHours();
+  var hours10 = Math.floor(hours / 10);
+  var hours1 = hours % 10;
+  var minutes = t.getMinutes();
+  var minutes10 = Math.floor(minutes / 10);
+  var minutes1 = minutes % 10;
+  var allBg = bg.repeat(COLS);
+  writeToStream('ANM 60000');
+
+  for (var c = 1; c >= 0; c--) {
+    writeToStream('FRM 500');
+
+    for (var i = 0; i < CLOCK_VERTICAL_OFFSET; i++) {
+      writeToStream('RGB ' + allBg);
+    }
+
+    for (var i = 0; i < DIGIT_ROWS; i++) {
+      writeToStream('RGB ' + digitRow(hours10, i, fg, bg) + bg + digitRow(hours1, i, fg, bg) + (c && i % 2 ? colon : bg).repeat(2) + digitRow(minutes10, i, fg, bg) + bg + digitRow(minutes1, i, fg, bg));
+    }
+
+    for (var i = 0; i < ROWS - (CLOCK_VERTICAL_OFFSET + DIGIT_ROWS); i++) {
+      writeToStream('RGB ' + allBg);
+    }
+  }
+
+  writeToStream('DON', 'NXT');
 }
 
 },{"gifuct-js":2,"regenerator-runtime/runtime":7}]},{},[8]);
