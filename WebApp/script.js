@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initPixelArt();
     initGamma();
     debugButton.onclick = function() { if (port) writeToStream('DBG'); };
-    clockButton.onclick = function() { drawClockMinute('FFFFFF', '000000', '0000FF'); };
+    clockButton.onclick = function() { drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]); };
 });
 
 
@@ -454,34 +454,47 @@ const Digits = [
    [1,1,1]]
 ];
 
-
-function digitRow(d, row, fg, bg) {
-    return Digits[d][row].map(p => p ? fg : bg).join('');
+function* fillRowIterator(color) {
+    for (var c = 0; c < COLS; c++) yield color;
 }
+
+function* bitmapRowIterator(row, fg, bg) {
+    for (var i = 0; i < row.length; i++) yield row[i] ? fg : bg;
+}
+
+function* digitRowIterator(row, h10, h1, m10, m1, fg, bg, colon) {
+    yield* bitmapRowIterator(Digits[h10][row], fg, bg);
+    yield bg;
+    yield* bitmapRowIterator(Digits[h1][row], fg, bg);
+    var center = row % 2 ? colon : bg;
+    yield center;
+    yield center;
+    yield* bitmapRowIterator(Digits[m10][row], fg, bg);
+    yield bg;
+    yield* bitmapRowIterator(Digits[m1][row], fg, bg);
+}
+
+function* digitalClockIterator(h10, h1, m10, m1, fg, bg, colon) {
+    for (var r = 0; r < CLOCK_VERTICAL_OFFSET; r++) {
+	yield fillRowIterator(bg);
+    }
+    for (var r = 0; r < DIGIT_ROWS; r++) {
+	yield digitRowIterator(r, h10, h1, m10, m1, fg, bg, colon);
+    }
+    for (var r = 0; r < ROWS-(CLOCK_VERTICAL_OFFSET+DIGIT_ROWS); r++) {
+	yield fillRowIterator(bg);
+    }
+}
+
 
 function drawClockMinute(fg, bg, colon) {
     var t = new Date();
     var hours = t.getHours();
-    var hours10 = Math.floor(hours/10);
-    var hours1 = hours%10;
     var minutes = t.getMinutes();
-    var minutes10 = Math.floor(minutes/10);
-    var minutes1 = minutes%10;
-    var allBg = bg.repeat(COLS);
-    writeToStream('ANM 60000');
-    for (var c = 1; c >= 0; c--) {
-    writeToStream('FRM 500');
-	for (var i = 0; i < CLOCK_VERTICAL_OFFSET; i++) {
-            writeToStream('RGB ' + allBg)
-	}
-	for (var i = 0; i < DIGIT_ROWS; i++) {
-	    writeToStream('RGB ' + digitRow(hours10, i, fg, bg)+bg+digitRow(hours1, i, fg, bg)+
-			  (c && i%2 ? colon : bg).repeat(2)+
-			  digitRow(minutes10, i, fg, bg)+bg+digitRow(minutes1, i, fg, bg));
-	}
-	for (var i = 0; i < ROWS-(CLOCK_VERTICAL_OFFSET+DIGIT_ROWS); i++) {
-            writeToStream('RGB ' + allBg)
-	}
-    }
-    writeToStream('DON', 'NXT');
+    var animation = new Animation(60000);
+    animation.addFrame(new Frame(500, digitalClockIterator(
+	  Math.floor(hours/10), hours%10,Math.floor(minutes/10),minutes%10, fg, bg, colon)));
+    animation.addFrame(new Frame(500, digitalClockIterator(
+	  Math.floor(hours/10), hours%10,Math.floor(minutes/10),minutes%10, fg, bg, bg)));
+    sendAnimation(animation);
 }

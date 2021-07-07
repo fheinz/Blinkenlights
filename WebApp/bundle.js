@@ -1432,7 +1432,11 @@ require("regenerator-runtime/runtime");
 
 var _gifuctJs = require("gifuct-js");
 
-var _marked = /*#__PURE__*/regeneratorRuntime.mark(gridIterator);
+var _marked = /*#__PURE__*/regeneratorRuntime.mark(gridIterator),
+    _marked2 = /*#__PURE__*/regeneratorRuntime.mark(fillRowIterator),
+    _marked3 = /*#__PURE__*/regeneratorRuntime.mark(bitmapRowIterator),
+    _marked4 = /*#__PURE__*/regeneratorRuntime.mark(digitRowIterator),
+    _marked5 = /*#__PURE__*/regeneratorRuntime.mark(digitalClockIterator);
 
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
@@ -1501,7 +1505,7 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
   clockButton.onclick = function () {
-    drawClockMinute('FFFFFF', '000000', '0000FF');
+    drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]);
   };
 });
 /**
@@ -1531,49 +1535,49 @@ function connect() {
 function _connect() {
   _connect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
     var ports, encoder, decoder;
-    return regeneratorRuntime.wrap(function _callee2$(_context3) {
+    return regeneratorRuntime.wrap(function _callee2$(_context7) {
       while (1) {
-        switch (_context3.prev = _context3.next) {
+        switch (_context7.prev = _context7.next) {
           case 0:
-            _context3.next = 2;
+            _context7.next = 2;
             return navigator.serial.getPorts();
 
           case 2:
-            ports = _context3.sent;
-            _context3.prev = 3;
+            ports = _context7.sent;
+            _context7.prev = 3;
 
             if (!(ports.length == 1)) {
-              _context3.next = 8;
+              _context7.next = 8;
               break;
             }
 
             port = ports[0];
-            _context3.next = 11;
+            _context7.next = 11;
             break;
 
           case 8:
-            _context3.next = 10;
+            _context7.next = 10;
             return navigator.serial.requestPort({
               filters: usbFilter
             });
 
           case 10:
-            port = _context3.sent;
+            port = _context7.sent;
 
           case 11:
-            _context3.next = 13;
+            _context7.next = 13;
             return port.open({
               baudRate: 115200
             });
 
           case 13:
-            _context3.next = 18;
+            _context7.next = 18;
             break;
 
           case 15:
-            _context3.prev = 15;
-            _context3.t0 = _context3["catch"](3);
-            return _context3.abrupt("return");
+            _context7.prev = 15;
+            _context7.t0 = _context7["catch"](3);
+            return _context7.abrupt("return");
 
           case 18:
             encoder = new TextEncoderStream();
@@ -1589,7 +1593,7 @@ function _connect() {
 
           case 28:
           case "end":
-            return _context3.stop();
+            return _context7.stop();
         }
       }
     }, _callee2, null, [[3, 15]]);
@@ -1608,22 +1612,22 @@ function disconnect() {
 
 function _disconnect() {
   _disconnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee3() {
-    return regeneratorRuntime.wrap(function _callee3$(_context4) {
+    return regeneratorRuntime.wrap(function _callee3$(_context8) {
       while (1) {
-        switch (_context4.prev = _context4.next) {
+        switch (_context8.prev = _context8.next) {
           case 0:
             writeToStream('RST');
 
             if (!reader) {
-              _context4.next = 8;
+              _context8.next = 8;
               break;
             }
 
-            _context4.next = 4;
+            _context8.next = 4;
             return reader.cancel();
 
           case 4:
-            _context4.next = 6;
+            _context8.next = 6;
             return inputDone["catch"](function () {});
 
           case 6:
@@ -1632,15 +1636,15 @@ function _disconnect() {
 
           case 8:
             if (!outputStream) {
-              _context4.next = 15;
+              _context8.next = 15;
               break;
             }
 
-            _context4.next = 11;
+            _context8.next = 11;
             return outputStream.getWriter().close();
 
           case 11:
-            _context4.next = 13;
+            _context8.next = 13;
             return outputDone;
 
           case 13:
@@ -1648,7 +1652,7 @@ function _disconnect() {
             outputDone = null;
 
           case 15:
-            _context4.next = 17;
+            _context8.next = 17;
             return port.close();
 
           case 17:
@@ -1656,7 +1660,7 @@ function _disconnect() {
 
           case 18:
           case "end":
-            return _context4.stop();
+            return _context8.stop();
         }
       }
     }, _callee3);
@@ -1675,24 +1679,24 @@ function clickConnect() {
 
 function _clickConnect() {
   _clickConnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee4() {
-    return regeneratorRuntime.wrap(function _callee4$(_context5) {
+    return regeneratorRuntime.wrap(function _callee4$(_context9) {
       while (1) {
-        switch (_context5.prev = _context5.next) {
+        switch (_context9.prev = _context9.next) {
           case 0:
             if (!port) {
-              _context5.next = 5;
+              _context9.next = 5;
               break;
             }
 
-            _context5.next = 3;
+            _context9.next = 3;
             return disconnect();
 
           case 3:
             toggleUIConnected(false);
-            return _context5.abrupt("return");
+            return _context9.abrupt("return");
 
           case 5:
-            _context5.next = 7;
+            _context9.next = 7;
             return connect();
 
           case 7:
@@ -1701,7 +1705,7 @@ function _clickConnect() {
 
           case 9:
           case "end":
-            return _context5.stop();
+            return _context9.stop();
         }
       }
     }, _callee4);
@@ -1717,20 +1721,20 @@ function _readLoop() {
   _readLoop = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee5() {
     var _yield$reader$read, value, done;
 
-    return regeneratorRuntime.wrap(function _callee5$(_context6) {
+    return regeneratorRuntime.wrap(function _callee5$(_context10) {
       while (1) {
-        switch (_context6.prev = _context6.next) {
+        switch (_context10.prev = _context10.next) {
           case 0:
             if (!true) {
-              _context6.next = 13;
+              _context10.next = 13;
               break;
             }
 
-            _context6.next = 3;
+            _context10.next = 3;
             return reader.read();
 
           case 3:
-            _yield$reader$read = _context6.sent;
+            _yield$reader$read = _context10.sent;
             value = _yield$reader$read.value;
             done = _yield$reader$read.done;
 
@@ -1739,21 +1743,21 @@ function _readLoop() {
             }
 
             if (!done) {
-              _context6.next = 11;
+              _context10.next = 11;
               break;
             }
 
             console.log('[readLoop] DONE', done);
             reader.releaseLock();
-            return _context6.abrupt("break", 13);
+            return _context10.abrupt("break", 13);
 
           case 11:
-            _context6.next = 0;
+            _context10.next = 0;
             break;
 
           case 13:
           case "end":
-            return _context6.stop();
+            return _context10.stop();
         }
       }
     }, _callee5);
@@ -2090,40 +2094,180 @@ var DIGIT_ROWS = 5;
 var CLOCK_VERTICAL_OFFSET = 5;
 var Digits = [[[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]], [[0, 1, 0], [1, 1, 0], [0, 1, 0], [0, 1, 0], [1, 1, 1]], [[1, 1, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], [1, 1, 1]], [[1, 1, 1], [0, 0, 1], [0, 1, 1], [0, 0, 1], [1, 1, 1]], [[1, 0, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [0, 0, 1]], [[1, 1, 1], [1, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 0]], [[1, 1, 1], [1, 0, 0], [1, 1, 1], [1, 0, 1], [1, 1, 1]], [[1, 1, 1], [0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 1, 0]], [[1, 1, 1], [1, 0, 1], [1, 1, 1], [1, 0, 1], [1, 1, 1]], [[1, 1, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [1, 1, 1]]];
 
-function digitRow(d, row, fg, bg) {
-  return Digits[d][row].map(function (p) {
-    return p ? fg : bg;
-  }).join('');
+function fillRowIterator(color) {
+  var c;
+  return regeneratorRuntime.wrap(function fillRowIterator$(_context3) {
+    while (1) {
+      switch (_context3.prev = _context3.next) {
+        case 0:
+          c = 0;
+
+        case 1:
+          if (!(c < COLS)) {
+            _context3.next = 7;
+            break;
+          }
+
+          _context3.next = 4;
+          return color;
+
+        case 4:
+          c++;
+          _context3.next = 1;
+          break;
+
+        case 7:
+        case "end":
+          return _context3.stop();
+      }
+    }
+  }, _marked2);
+}
+
+function bitmapRowIterator(row, fg, bg) {
+  var i;
+  return regeneratorRuntime.wrap(function bitmapRowIterator$(_context4) {
+    while (1) {
+      switch (_context4.prev = _context4.next) {
+        case 0:
+          i = 0;
+
+        case 1:
+          if (!(i < row.length)) {
+            _context4.next = 7;
+            break;
+          }
+
+          _context4.next = 4;
+          return row[i] ? fg : bg;
+
+        case 4:
+          i++;
+          _context4.next = 1;
+          break;
+
+        case 7:
+        case "end":
+          return _context4.stop();
+      }
+    }
+  }, _marked3);
+}
+
+function digitRowIterator(row, h10, h1, m10, m1, fg, bg, colon) {
+  var center;
+  return regeneratorRuntime.wrap(function digitRowIterator$(_context5) {
+    while (1) {
+      switch (_context5.prev = _context5.next) {
+        case 0:
+          return _context5.delegateYield(bitmapRowIterator(Digits[h10][row], fg, bg), "t0", 1);
+
+        case 1:
+          _context5.next = 3;
+          return bg;
+
+        case 3:
+          return _context5.delegateYield(bitmapRowIterator(Digits[h1][row], fg, bg), "t1", 4);
+
+        case 4:
+          center = row % 2 ? colon : bg;
+          _context5.next = 7;
+          return center;
+
+        case 7:
+          _context5.next = 9;
+          return center;
+
+        case 9:
+          return _context5.delegateYield(bitmapRowIterator(Digits[m10][row], fg, bg), "t2", 10);
+
+        case 10:
+          _context5.next = 12;
+          return bg;
+
+        case 12:
+          return _context5.delegateYield(bitmapRowIterator(Digits[m1][row], fg, bg), "t3", 13);
+
+        case 13:
+        case "end":
+          return _context5.stop();
+      }
+    }
+  }, _marked4);
+}
+
+function digitalClockIterator(h10, h1, m10, m1, fg, bg, colon) {
+  var r;
+  return regeneratorRuntime.wrap(function digitalClockIterator$(_context6) {
+    while (1) {
+      switch (_context6.prev = _context6.next) {
+        case 0:
+          r = 0;
+
+        case 1:
+          if (!(r < CLOCK_VERTICAL_OFFSET)) {
+            _context6.next = 7;
+            break;
+          }
+
+          _context6.next = 4;
+          return fillRowIterator(bg);
+
+        case 4:
+          r++;
+          _context6.next = 1;
+          break;
+
+        case 7:
+          r = 0;
+
+        case 8:
+          if (!(r < DIGIT_ROWS)) {
+            _context6.next = 14;
+            break;
+          }
+
+          _context6.next = 11;
+          return digitRowIterator(r, h10, h1, m10, m1, fg, bg, colon);
+
+        case 11:
+          r++;
+          _context6.next = 8;
+          break;
+
+        case 14:
+          r = 0;
+
+        case 15:
+          if (!(r < ROWS - (CLOCK_VERTICAL_OFFSET + DIGIT_ROWS))) {
+            _context6.next = 21;
+            break;
+          }
+
+          _context6.next = 18;
+          return fillRowIterator(bg);
+
+        case 18:
+          r++;
+          _context6.next = 15;
+          break;
+
+        case 21:
+        case "end":
+          return _context6.stop();
+      }
+    }
+  }, _marked5);
 }
 
 function drawClockMinute(fg, bg, colon) {
   var t = new Date();
   var hours = t.getHours();
-  var hours10 = Math.floor(hours / 10);
-  var hours1 = hours % 10;
   var minutes = t.getMinutes();
-  var minutes10 = Math.floor(minutes / 10);
-  var minutes1 = minutes % 10;
-  var allBg = bg.repeat(COLS);
-  writeToStream('ANM 60000');
-
-  for (var c = 1; c >= 0; c--) {
-    writeToStream('FRM 500');
-
-    for (var i = 0; i < CLOCK_VERTICAL_OFFSET; i++) {
-      writeToStream('RGB ' + allBg);
-    }
-
-    for (var i = 0; i < DIGIT_ROWS; i++) {
-      writeToStream('RGB ' + digitRow(hours10, i, fg, bg) + bg + digitRow(hours1, i, fg, bg) + (c && i % 2 ? colon : bg).repeat(2) + digitRow(minutes10, i, fg, bg) + bg + digitRow(minutes1, i, fg, bg));
-    }
-
-    for (var i = 0; i < ROWS - (CLOCK_VERTICAL_OFFSET + DIGIT_ROWS); i++) {
-      writeToStream('RGB ' + allBg);
-    }
-  }
-
-  writeToStream('DON', 'NXT');
+  var animation = new Animation(60000);
+  animation.addFrame(new Frame(500, digitalClockIterator(Math.floor(hours / 10), hours % 10, Math.floor(minutes / 10), minutes % 10, fg, bg, colon)));
+  animation.addFrame(new Frame(500, digitalClockIterator(Math.floor(hours / 10), hours % 10, Math.floor(minutes / 10), minutes % 10, fg, bg, bg)));
+  sendAnimation(animation);
 }
 
 },{"gifuct-js":2,"regenerator-runtime/runtime":7}]},{},[8]);
