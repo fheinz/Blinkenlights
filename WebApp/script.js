@@ -202,21 +202,32 @@ function sendAnimation(anim) {
 
 /**
  * @name sendGrid
- * Iterates over the checkboxes and generates the command to set the LEDs.
+ * Iterator of iterators over the checkbox grid to create an animation frame.
+ */
+function* gridIterator() {
+    for (var r = 0; r < ROWS; r++) {
+	var start = r * COLS;
+	var end = start + COLS;
+	yield (function* () {
+	    for (var i = start; i < end; i++) {
+		yield ledCBs[i].checked ? [0xff, 0xff, 0xff] : [0x00, 0x00, 0x00];
+	    }
+	})();
+    }
+}
+
+
+
+/**
+ * @name sendGrid
+ * Display the grid state on the board
  */
 function sendGrid() {
-    writeToStream('ANM 600000', 'FRM 1000');
-    var i = 0;
-    var px = [];
-    ledCBs.forEach((cb) => {
-	px.push(cb.checked ? 'FFFFFF' : '000000');
-	if (++i % COLS == 0 ) {
-	    writeToStream('RGB ' + px.join(''));
-	    px = [];
-	}
-    });
-    writeToStream('DON', 'NXT');
+    var animation = new  Animation(600000);
+    animation.addFrame(new Frame(1000, gridIterator()));
+    sendAnimation(animation);
 }
+
 
 
 /**

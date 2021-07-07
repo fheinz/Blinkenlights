@@ -1432,6 +1432,8 @@ require("regenerator-runtime/runtime");
 
 var _gifuctJs = require("gifuct-js");
 
+var _marked = /*#__PURE__*/regeneratorRuntime.mark(gridIterator);
+
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
 function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
@@ -1527,51 +1529,51 @@ function connect() {
 
 
 function _connect() {
-  _connect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
+  _connect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
     var ports, encoder, decoder;
-    return regeneratorRuntime.wrap(function _callee$(_context) {
+    return regeneratorRuntime.wrap(function _callee2$(_context3) {
       while (1) {
-        switch (_context.prev = _context.next) {
+        switch (_context3.prev = _context3.next) {
           case 0:
-            _context.next = 2;
+            _context3.next = 2;
             return navigator.serial.getPorts();
 
           case 2:
-            ports = _context.sent;
-            _context.prev = 3;
+            ports = _context3.sent;
+            _context3.prev = 3;
 
             if (!(ports.length == 1)) {
-              _context.next = 8;
+              _context3.next = 8;
               break;
             }
 
             port = ports[0];
-            _context.next = 11;
+            _context3.next = 11;
             break;
 
           case 8:
-            _context.next = 10;
+            _context3.next = 10;
             return navigator.serial.requestPort({
               filters: usbFilter
             });
 
           case 10:
-            port = _context.sent;
+            port = _context3.sent;
 
           case 11:
-            _context.next = 13;
+            _context3.next = 13;
             return port.open({
               baudRate: 115200
             });
 
           case 13:
-            _context.next = 18;
+            _context3.next = 18;
             break;
 
           case 15:
-            _context.prev = 15;
-            _context.t0 = _context["catch"](3);
-            return _context.abrupt("return");
+            _context3.prev = 15;
+            _context3.t0 = _context3["catch"](3);
+            return _context3.abrupt("return");
 
           case 18:
             encoder = new TextEncoderStream();
@@ -1587,10 +1589,10 @@ function _connect() {
 
           case 28:
           case "end":
-            return _context.stop();
+            return _context3.stop();
         }
       }
-    }, _callee, null, [[3, 15]]);
+    }, _callee2, null, [[3, 15]]);
   }));
   return _connect.apply(this, arguments);
 }
@@ -1605,23 +1607,23 @@ function disconnect() {
 
 
 function _disconnect() {
-  _disconnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
-    return regeneratorRuntime.wrap(function _callee2$(_context2) {
+  _disconnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee3() {
+    return regeneratorRuntime.wrap(function _callee3$(_context4) {
       while (1) {
-        switch (_context2.prev = _context2.next) {
+        switch (_context4.prev = _context4.next) {
           case 0:
             writeToStream('RST');
 
             if (!reader) {
-              _context2.next = 8;
+              _context4.next = 8;
               break;
             }
 
-            _context2.next = 4;
+            _context4.next = 4;
             return reader.cancel();
 
           case 4:
-            _context2.next = 6;
+            _context4.next = 6;
             return inputDone["catch"](function () {});
 
           case 6:
@@ -1630,15 +1632,15 @@ function _disconnect() {
 
           case 8:
             if (!outputStream) {
-              _context2.next = 15;
+              _context4.next = 15;
               break;
             }
 
-            _context2.next = 11;
+            _context4.next = 11;
             return outputStream.getWriter().close();
 
           case 11:
-            _context2.next = 13;
+            _context4.next = 13;
             return outputDone;
 
           case 13:
@@ -1646,7 +1648,7 @@ function _disconnect() {
             outputDone = null;
 
           case 15:
-            _context2.next = 17;
+            _context4.next = 17;
             return port.close();
 
           case 17:
@@ -1654,10 +1656,10 @@ function _disconnect() {
 
           case 18:
           case "end":
-            return _context2.stop();
+            return _context4.stop();
         }
       }
-    }, _callee2);
+    }, _callee3);
   }));
   return _disconnect.apply(this, arguments);
 }
@@ -1672,25 +1674,25 @@ function clickConnect() {
 
 
 function _clickConnect() {
-  _clickConnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee3() {
-    return regeneratorRuntime.wrap(function _callee3$(_context3) {
+  _clickConnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee4() {
+    return regeneratorRuntime.wrap(function _callee4$(_context5) {
       while (1) {
-        switch (_context3.prev = _context3.next) {
+        switch (_context5.prev = _context5.next) {
           case 0:
             if (!port) {
-              _context3.next = 5;
+              _context5.next = 5;
               break;
             }
 
-            _context3.next = 3;
+            _context5.next = 3;
             return disconnect();
 
           case 3:
             toggleUIConnected(false);
-            return _context3.abrupt("return");
+            return _context5.abrupt("return");
 
           case 5:
-            _context3.next = 7;
+            _context5.next = 7;
             return connect();
 
           case 7:
@@ -1699,10 +1701,10 @@ function _clickConnect() {
 
           case 9:
           case "end":
-            return _context3.stop();
+            return _context5.stop();
         }
       }
-    }, _callee3);
+    }, _callee4);
   }));
   return _clickConnect.apply(this, arguments);
 }
@@ -1712,23 +1714,23 @@ function readLoop() {
 }
 
 function _readLoop() {
-  _readLoop = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee4() {
+  _readLoop = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee5() {
     var _yield$reader$read, value, done;
 
-    return regeneratorRuntime.wrap(function _callee4$(_context4) {
+    return regeneratorRuntime.wrap(function _callee5$(_context6) {
       while (1) {
-        switch (_context4.prev = _context4.next) {
+        switch (_context6.prev = _context6.next) {
           case 0:
             if (!true) {
-              _context4.next = 13;
+              _context6.next = 13;
               break;
             }
 
-            _context4.next = 3;
+            _context6.next = 3;
             return reader.read();
 
           case 3:
-            _yield$reader$read = _context4.sent;
+            _yield$reader$read = _context6.sent;
             value = _yield$reader$read.value;
             done = _yield$reader$read.done;
 
@@ -1737,24 +1739,24 @@ function _readLoop() {
             }
 
             if (!done) {
-              _context4.next = 11;
+              _context6.next = 11;
               break;
             }
 
             console.log('[readLoop] DONE', done);
             reader.releaseLock();
-            return _context4.abrupt("break", 13);
+            return _context6.abrupt("break", 13);
 
           case 11:
-            _context4.next = 0;
+            _context6.next = 0;
             break;
 
           case 13:
           case "end":
-            return _context4.stop();
+            return _context6.stop();
         }
       }
-    }, _callee4);
+    }, _callee5);
   }));
   return _readLoop.apply(this, arguments);
 }
@@ -1805,23 +1807,79 @@ function sendAnimation(anim) {
 }
 /**
  * @name sendGrid
- * Iterates over the checkboxes and generates the command to set the LEDs.
+ * Iterator of iterators over the checkbox grid to create an animation frame.
+ */
+
+
+function gridIterator() {
+  var r, start, end;
+  return regeneratorRuntime.wrap(function gridIterator$(_context2) {
+    while (1) {
+      switch (_context2.prev = _context2.next) {
+        case 0:
+          r = 0;
+
+        case 1:
+          if (!(r < ROWS)) {
+            _context2.next = 9;
+            break;
+          }
+
+          start = r * COLS;
+          end = start + COLS;
+          _context2.next = 6;
+          return /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
+            var i;
+            return regeneratorRuntime.wrap(function _callee$(_context) {
+              while (1) {
+                switch (_context.prev = _context.next) {
+                  case 0:
+                    i = start;
+
+                  case 1:
+                    if (!(i < end)) {
+                      _context.next = 7;
+                      break;
+                    }
+
+                    _context.next = 4;
+                    return ledCBs[i].checked ? [0xff, 0xff, 0xff] : [0x00, 0x00, 0x00];
+
+                  case 4:
+                    i++;
+                    _context.next = 1;
+                    break;
+
+                  case 7:
+                  case "end":
+                    return _context.stop();
+                }
+              }
+            }, _callee);
+          })();
+
+        case 6:
+          r++;
+          _context2.next = 1;
+          break;
+
+        case 9:
+        case "end":
+          return _context2.stop();
+      }
+    }
+  }, _marked);
+}
+/**
+ * @name sendGrid
+ * Display the grid state on the board
  */
 
 
 function sendGrid() {
-  writeToStream('ANM 600000', 'FRM 1000');
-  var i = 0;
-  var px = [];
-  ledCBs.forEach(function (cb) {
-    px.push(cb.checked ? 'FFFFFF' : '000000');
-
-    if (++i % COLS == 0) {
-      writeToStream('RGB ' + px.join(''));
-      px = [];
-    }
-  });
-  writeToStream('DON', 'NXT');
+  var animation = new Animation(600000);
+  animation.addFrame(new Frame(1000, gridIterator()));
+  sendAnimation(animation);
 }
 /**
  * @name sendGifAnimation
