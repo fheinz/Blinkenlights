@@ -144,7 +144,7 @@ async function clickConnect() {
     await connect();
     toggleUIConnected(true);
     if (currentImage)
-	sendAnimation(currentImage);
+	sendGifAnimation(currentImage);
     else
 	sendGrid();
 }
@@ -169,6 +169,37 @@ async function readLoop() {
 }
 
 
+class Frame {
+    constructor(ms, pixels) {
+	this.duration = ms;
+	this.rows = Array.from(pixels, row => Array.from(
+	      row, ([r, g, b]) => paddedHex(gammaTable[r]<<16 | gammaTable[g] << 8 | gammaTable[b], 6)).join(''));
+    }
+}
+
+
+class Animation{
+    constructor(ms) {
+	this.duration = ms;
+	this.frames = [];
+    }
+
+    addFrame(f) {
+	this.frames.push(f);
+    }
+}
+
+
+function sendAnimation(anim) {
+    writeToStream('ANM ' + anim.duration);
+    anim.frames.forEach(function(frame) {
+	writeToStream('FRM ' + frame.duration);
+	frame.rows.forEach(row => writeToStream('RGB ' + row));
+    });
+    writeToStream('DON', 'NXT');
+}
+
+
 /**
  * @name sendGrid
  * Iterates over the checkboxes and generates the command to set the LEDs.
@@ -189,10 +220,10 @@ function sendGrid() {
 
 
 /**
- * @name sendAnimation
+ * @name sendGifAnimation
  * Sends a GIF animation to the display
  */
-function sendAnimation(img) {
+function sendGifAnimation(img) {
     var oReq = new XMLHttpRequest();
     oReq.open('GET', img.src, true);
     oReq.responseType = 'arraybuffer';
@@ -205,28 +236,22 @@ function sendAnimation(img) {
 		return;
 	    var frames = decompressFrames(gif, true);
 	    if (frames) {
-		writeToStream('ANM 600000');
+		var animation = new Animation(600000);
 		var pixels = Array(ROWS).fill().map(() => Array(COLS));
-		frames.forEach(function(frame) {
-		    writeToStream('FRM ' +
-				  ('delay' in frame ? frame.delay : 1000));
+		frames.forEach(function(gifFrame) {
 		    pixels.forEach(row => row.fill(0));
-		    var bitmap = frame.patch;
-		    var row_offset = frame.dims.top;
-		    var col_offset = frame.dims.left;
-		    for (var r = 0; r < frame.dims.height; r++) {
-			for (var c = 0; c < frame.dims.width; c++) {
-			    var offset = (r * frame.dims.width + c) * 4;
-			    pixels[r+row_offset][c+col_offset] = gammaTable[bitmap[offset]]<<16 |
-				gammaTable[bitmap[offset+1]] << 8 |
-				gammaTable[bitmap[offset+2]];
+		    var bitmap = gifFrame.patch;
+		    var row_offset = gifFrame.dims.top;
+		    var col_offset = gifFrame.dims.left;
+		    for (var r = 0; r < gifFrame.dims.height; r++) {
+			for (var c = 0; c < gifFrame.dims.width; c++) {
+			    var offset = (r * gifFrame.dims.width + c) * 4;
+			    pixels[r+row_offset][c+col_offset] = [bitmap[offset], bitmap[offset+1], bitmap[offset+2]];
 			}
 		    }
-		    for (var r = 0; r < ROWS; r++) {
-			writeToStream('RGB ' + (pixels[r].map(p => paddedHex(p, 6)).join('')));
-		    }
+		    animation.addFrame(new Frame('delay' in gifFrame ? gifFrame.delay : 1000, pixels));
 		});
-		writeToStream('DON', 'NXT');
+		sendAnimation(animation);
 	    }
 	}
     }
@@ -285,7 +310,7 @@ function initPixelArt() {
 	img.crossOrigin = "Anonymous";
 	ctx.drawImage(img, 0, 0);
 	img.onclick = function() {
-	    if (port) sendAnimation(img);
+	    if (port) sendGifAnimation(img);
 	    currentImage = img;
 	};
     });
@@ -304,7 +329,7 @@ function updateGamma() {
     let i = 0;
     gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**invGamma)));
     if (currentImage) {
-	sendAnimation(currentImage);
+	sendGifAnimation(currentImage);
     }
 }
 

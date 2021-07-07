@@ -1432,11 +1432,23 @@ require("regenerator-runtime/runtime");
 
 var _gifuctJs = require("gifuct-js");
 
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
 function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
+
+function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
+
+function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+function _iterableToArrayLimit(arr, i) { var _i = arr && (typeof Symbol !== "undefined" && arr[Symbol.iterator] || arr["@@iterator"]); if (_i == null) return; var _arr = []; var _n = true; var _d = false; var _s, _e; try { for (_i = _i.call(arr); !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"] != null) _i["return"](); } finally { if (_d) throw _e; } } return _arr; }
+
+function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { Promise.resolve(value).then(_next, _throw); } }
 
@@ -1683,7 +1695,7 @@ function _clickConnect() {
 
           case 7:
             toggleUIConnected(true);
-            if (currentImage) sendAnimation(currentImage);else sendGrid();
+            if (currentImage) sendGifAnimation(currentImage);else sendGrid();
 
           case 9:
           case "end":
@@ -1698,11 +1710,6 @@ function _clickConnect() {
 function readLoop() {
   return _readLoop.apply(this, arguments);
 }
-/**
- * @name sendGrid
- * Iterates over the checkboxes and generates the command to set the LEDs.
- */
-
 
 function _readLoop() {
   _readLoop = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee4() {
@@ -1752,6 +1759,56 @@ function _readLoop() {
   return _readLoop.apply(this, arguments);
 }
 
+var Frame = function Frame(ms, pixels) {
+  _classCallCheck(this, Frame);
+
+  this.duration = ms;
+  this.rows = Array.from(pixels, function (row) {
+    return Array.from(row, function (_ref) {
+      var _ref2 = _slicedToArray(_ref, 3),
+          r = _ref2[0],
+          g = _ref2[1],
+          b = _ref2[2];
+
+      return paddedHex(gammaTable[r] << 16 | gammaTable[g] << 8 | gammaTable[b], 6);
+    }).join('');
+  });
+};
+
+var Animation = /*#__PURE__*/function () {
+  function Animation(ms) {
+    _classCallCheck(this, Animation);
+
+    this.duration = ms;
+    this.frames = [];
+  }
+
+  _createClass(Animation, [{
+    key: "addFrame",
+    value: function addFrame(f) {
+      this.frames.push(f);
+    }
+  }]);
+
+  return Animation;
+}();
+
+function sendAnimation(anim) {
+  writeToStream('ANM ' + anim.duration);
+  anim.frames.forEach(function (frame) {
+    writeToStream('FRM ' + frame.duration);
+    frame.rows.forEach(function (row) {
+      return writeToStream('RGB ' + row);
+    });
+  });
+  writeToStream('DON', 'NXT');
+}
+/**
+ * @name sendGrid
+ * Iterates over the checkboxes and generates the command to set the LEDs.
+ */
+
+
 function sendGrid() {
   writeToStream('ANM 600000', 'FRM 1000');
   var i = 0;
@@ -1767,12 +1824,12 @@ function sendGrid() {
   writeToStream('DON', 'NXT');
 }
 /**
- * @name sendAnimation
+ * @name sendGifAnimation
  * Sends a GIF animation to the display
  */
 
 
-function sendAnimation(img) {
+function sendGifAnimation(img) {
   var oReq = new XMLHttpRequest();
   oReq.open('GET', img.src, true);
   oReq.responseType = 'arraybuffer';
@@ -1786,33 +1843,28 @@ function sendAnimation(img) {
       var frames = (0, _gifuctJs.decompressFrames)(gif, true);
 
       if (frames) {
-        writeToStream('ANM 600000');
+        var animation = new Animation(600000);
         var pixels = Array(ROWS).fill().map(function () {
           return Array(COLS);
         });
-        frames.forEach(function (frame) {
-          writeToStream('FRM ' + ('delay' in frame ? frame.delay : 1000));
+        frames.forEach(function (gifFrame) {
           pixels.forEach(function (row) {
             return row.fill(0);
           });
-          var bitmap = frame.patch;
-          var row_offset = frame.dims.top;
-          var col_offset = frame.dims.left;
+          var bitmap = gifFrame.patch;
+          var row_offset = gifFrame.dims.top;
+          var col_offset = gifFrame.dims.left;
 
-          for (var r = 0; r < frame.dims.height; r++) {
-            for (var c = 0; c < frame.dims.width; c++) {
-              var offset = (r * frame.dims.width + c) * 4;
-              pixels[r + row_offset][c + col_offset] = gammaTable[bitmap[offset]] << 16 | gammaTable[bitmap[offset + 1]] << 8 | gammaTable[bitmap[offset + 2]];
+          for (var r = 0; r < gifFrame.dims.height; r++) {
+            for (var c = 0; c < gifFrame.dims.width; c++) {
+              var offset = (r * gifFrame.dims.width + c) * 4;
+              pixels[r + row_offset][c + col_offset] = [bitmap[offset], bitmap[offset + 1], bitmap[offset + 2]];
             }
           }
 
-          for (var r = 0; r < ROWS; r++) {
-            writeToStream('RGB ' + pixels[r].map(function (p) {
-              return paddedHex(p, 6);
-            }).join(''));
-          }
+          animation.addFrame(new Frame('delay' in gifFrame ? gifFrame.delay : 1000, pixels));
         });
-        writeToStream('DON', 'NXT');
+        sendAnimation(animation);
       }
     }
   };
@@ -1889,7 +1941,7 @@ function initPixelArt() {
     ctx.drawImage(img, 0, 0);
 
     img.onclick = function () {
-      if (port) sendAnimation(img);
+      if (port) sendGifAnimation(img);
       currentImage = img;
     };
   });
@@ -1911,7 +1963,7 @@ function updateGamma() {
   });
 
   if (currentImage) {
-    sendAnimation(currentImage);
+    sendGifAnimation(currentImage);
   }
 }
 
