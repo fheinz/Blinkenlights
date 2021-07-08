@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initPixelArt();
     initGamma();
     debugButton.onclick = function() { if (port) writeToStream('DBG'); };
-    clockButton.onclick = function() { drawClockMinute('FFFFFF', '000000', '0000FF'); };
+    clockButton.onclick = function() { drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]); };
 });
 
 
@@ -144,7 +144,7 @@ async function clickConnect() {
     await connect();
     toggleUIConnected(true);
     if (currentImage)
-	sendAnimation(currentImage);
+	sendGifAnimation(currentImage);
     else
 	sendGrid();
 }
@@ -169,30 +169,72 @@ async function readLoop() {
 }
 
 
-/**
- * @name sendGrid
- * Iterates over the checkboxes and generates the command to set the LEDs.
- */
-function sendGrid() {
-    writeToStream('ANM 600000', 'FRM 1000');
-    var i = 0;
-    var px = [];
-    ledCBs.forEach((cb) => {
-	px.push(cb.checked ? 'FFFFFF' : '000000');
-	if (++i % COLS == 0 ) {
-	    writeToStream('RGB ' + px.join(''));
-	    px = [];
-	}
+class Frame {
+    constructor(ms, pixels) {
+	this.duration = ms;
+	this.rows = Array.from(pixels, row => Array.from(
+	      row, ([r, g, b]) => paddedHex(gammaTable[r]<<16 | gammaTable[g] << 8 | gammaTable[b], 6)).join(''));
+    }
+}
+
+
+class Animation{
+    constructor(ms) {
+	this.duration = ms;
+	this.frames = [];
+    }
+
+    addFrame(f) {
+	this.frames.push(f);
+    }
+}
+
+
+function sendAnimation(anim) {
+    writeToStream('ANM ' + anim.duration);
+    anim.frames.forEach(function(frame) {
+	writeToStream('FRM ' + frame.duration);
+	frame.rows.forEach(row => writeToStream('RGB ' + row));
     });
     writeToStream('DON', 'NXT');
 }
 
 
 /**
- * @name sendAnimation
+ * @name sendGrid
+ * Iterator of iterators over the checkbox grid to create an animation frame.
+ */
+function* gridIterator() {
+    for (var r = 0; r < ROWS; r++) {
+	var start = r * COLS;
+	var end = start + COLS;
+	yield (function* () {
+	    for (var i = start; i < end; i++) {
+		yield ledCBs[i].checked ? [0xff, 0xff, 0xff] : [0x00, 0x00, 0x00];
+	    }
+	})();
+    }
+}
+
+
+
+/**
+ * @name sendGrid
+ * Display the grid state on the board
+ */
+function sendGrid() {
+    var animation = new  Animation(600000);
+    animation.addFrame(new Frame(1000, gridIterator()));
+    sendAnimation(animation);
+}
+
+
+
+/**
+ * @name sendGifAnimation
  * Sends a GIF animation to the display
  */
-function sendAnimation(img) {
+function sendGifAnimation(img) {
     var oReq = new XMLHttpRequest();
     oReq.open('GET', img.src, true);
     oReq.responseType = 'arraybuffer';
@@ -205,28 +247,22 @@ function sendAnimation(img) {
 		return;
 	    var frames = decompressFrames(gif, true);
 	    if (frames) {
-		writeToStream('ANM 600000');
+		var animation = new Animation(600000);
 		var pixels = Array(ROWS).fill().map(() => Array(COLS));
-		frames.forEach(function(frame) {
-		    writeToStream('FRM ' +
-				  ('delay' in frame ? frame.delay : 1000));
+		frames.forEach(function(gifFrame) {
 		    pixels.forEach(row => row.fill(0));
-		    var bitmap = frame.patch;
-		    var row_offset = frame.dims.top;
-		    var col_offset = frame.dims.left;
-		    for (var r = 0; r < frame.dims.height; r++) {
-			for (var c = 0; c < frame.dims.width; c++) {
-			    var offset = (r * frame.dims.width + c) * 4;
-			    pixels[r+row_offset][c+col_offset] = gammaTable[bitmap[offset]]<<16 |
-				gammaTable[bitmap[offset+1]] << 8 |
-				gammaTable[bitmap[offset+2]];
+		    var bitmap = gifFrame.patch;
+		    var row_offset = gifFrame.dims.top;
+		    var col_offset = gifFrame.dims.left;
+		    for (var r = 0; r < gifFrame.dims.height; r++) {
+			for (var c = 0; c < gifFrame.dims.width; c++) {
+			    var offset = (r * gifFrame.dims.width + c) * 4;
+			    pixels[r+row_offset][c+col_offset] = [bitmap[offset], bitmap[offset+1], bitmap[offset+2]];
 			}
 		    }
-		    for (var r = 0; r < ROWS; r++) {
-			writeToStream('RGB ' + (pixels[r].map(p => paddedHex(p, 6)).join('')));
-		    }
+		    animation.addFrame(new Frame('delay' in gifFrame ? gifFrame.delay : 1000, pixels));
 		});
-		writeToStream('DON', 'NXT');
+		sendAnimation(animation);
 	    }
 	}
     }
@@ -285,7 +321,7 @@ function initPixelArt() {
 	img.crossOrigin = "Anonymous";
 	ctx.drawImage(img, 0, 0);
 	img.onclick = function() {
-	    if (port) sendAnimation(img);
+	    if (port) sendGifAnimation(img);
 	    currentImage = img;
 	};
     });
@@ -304,7 +340,7 @@ function updateGamma() {
     let i = 0;
     gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**invGamma)));
     if (currentImage) {
-	sendAnimation(currentImage);
+	sendGifAnimation(currentImage);
     }
 }
 
@@ -418,34 +454,47 @@ const Digits = [
    [1,1,1]]
 ];
 
-
-function digitRow(d, row, fg, bg) {
-    return Digits[d][row].map(p => p ? fg : bg).join('');
+function* fillRowIterator(color) {
+    for (var c = 0; c < COLS; c++) yield color;
 }
+
+function* bitmapRowIterator(row, fg, bg) {
+    for (var i = 0; i < row.length; i++) yield row[i] ? fg : bg;
+}
+
+function* digitRowIterator(row, h10, h1, m10, m1, fg, bg, colon) {
+    yield* bitmapRowIterator(Digits[h10][row], fg, bg);
+    yield bg;
+    yield* bitmapRowIterator(Digits[h1][row], fg, bg);
+    var center = row % 2 ? colon : bg;
+    yield center;
+    yield center;
+    yield* bitmapRowIterator(Digits[m10][row], fg, bg);
+    yield bg;
+    yield* bitmapRowIterator(Digits[m1][row], fg, bg);
+}
+
+function* digitalClockIterator(h10, h1, m10, m1, fg, bg, colon) {
+    for (var r = 0; r < CLOCK_VERTICAL_OFFSET; r++) {
+	yield fillRowIterator(bg);
+    }
+    for (var r = 0; r < DIGIT_ROWS; r++) {
+	yield digitRowIterator(r, h10, h1, m10, m1, fg, bg, colon);
+    }
+    for (var r = 0; r < ROWS-(CLOCK_VERTICAL_OFFSET+DIGIT_ROWS); r++) {
+	yield fillRowIterator(bg);
+    }
+}
+
 
 function drawClockMinute(fg, bg, colon) {
     var t = new Date();
     var hours = t.getHours();
-    var hours10 = Math.floor(hours/10);
-    var hours1 = hours%10;
     var minutes = t.getMinutes();
-    var minutes10 = Math.floor(minutes/10);
-    var minutes1 = minutes%10;
-    var allBg = bg.repeat(COLS);
-    writeToStream('ANM 60000');
-    for (var c = 1; c >= 0; c--) {
-    writeToStream('FRM 500');
-	for (var i = 0; i < CLOCK_VERTICAL_OFFSET; i++) {
-            writeToStream('RGB ' + allBg)
-	}
-	for (var i = 0; i < DIGIT_ROWS; i++) {
-	    writeToStream('RGB ' + digitRow(hours10, i, fg, bg)+bg+digitRow(hours1, i, fg, bg)+
-			  (c && i%2 ? colon : bg).repeat(2)+
-			  digitRow(minutes10, i, fg, bg)+bg+digitRow(minutes1, i, fg, bg));
-	}
-	for (var i = 0; i < ROWS-(CLOCK_VERTICAL_OFFSET+DIGIT_ROWS); i++) {
-            writeToStream('RGB ' + allBg)
-	}
-    }
-    writeToStream('DON', 'NXT');
+    var animation = new Animation(60000);
+    animation.addFrame(new Frame(500, digitalClockIterator(
+	  Math.floor(hours/10), hours%10,Math.floor(minutes/10),minutes%10, fg, bg, colon)));
+    animation.addFrame(new Frame(500, digitalClockIterator(
+	  Math.floor(hours/10), hours%10,Math.floor(minutes/10),minutes%10, fg, bg, bg)));
+    sendAnimation(animation);
 }
