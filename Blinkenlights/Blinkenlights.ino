@@ -21,6 +21,9 @@
 #include "Stream.h"
 #include <Preferences.h>
 
+constexpr int BaudRate = 115200;
+constexpr int SerialRxBufferSize = 4 * 1024;
+
 // Pin definitions
 constexpr int kOnboardLed0Pin = 32;
 constexpr int kOnboardLed1Pin = 33;
@@ -266,38 +269,37 @@ UsbCurrentAvailable currentAvailable = UsbCurrentAvailable::kNone;
 UsbCurrentAvailable currentAvailableDetected = UsbCurrentAvailable::kNone;
 
 uint32_t PowerUpdate() {
+  uint32_t nextLoop;
   UsbCurrentAvailable current_advertisement = DetermineMaxCurrent();
-  if (currentAvailable == current_advertisement) 
-    goto done;
   if (currentAvailableDetected == current_advertisement) {
     // We detected this change 15ms ago, so it can't be a PD message
     // because those take 10ms max.
     switch (current_advertisement) {
       case UsbCurrentAvailable::k3A:
-        digitalWrite(kOnboardLed0Pin, HIGH);
-        digitalWrite(kOnboardLed1Pin, HIGH);
         FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) / kMatrixMaxCurrent);
         EnableLEDPower();
         break;
       case UsbCurrentAvailable::k1_5A:
-        digitalWrite(kOnboardLed0Pin, LOW);
-        digitalWrite(kOnboardLed1Pin, HIGH);
         FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) / kMatrixMaxCurrent);
         EnableLEDPower();
         break;
       default:
-        digitalWrite(kOnboardLed0Pin, LOW);
-        digitalWrite(kOnboardLed1Pin, LOW);
         DisableLEDPower();
     }
     currentAvailable = current_advertisement;
-  done:
-    currentAvailableDetected = UsbCurrentAvailable::kNone;
-    return 30;
   }
-  // We just detected this change... check back in 15ms to see if it's still there.
-  currentAvailableDetected = current_advertisement;
-  return 15;
+  if (currentAvailable == current_advertisement) {
+    currentAvailableDetected = UsbCurrentAvailable::kNone;
+    nextLoop = 30;
+  } else {
+    // We just detected this change... check back in 15ms to see if it's still there.
+    currentAvailableDetected = current_advertisement;
+    nextLoop = 15;
+  }
+  digitalWrite(kOnboardLed0Pin,
+               currentAvailable == UsbCurrentAvailable::k3A ||
+               currentAvailable == UsbCurrentAvailable::k1_5A && (millis()/500)%2 ? HIGH : LOW);
+  return nextLoop;
 }
 
 /*
@@ -992,8 +994,8 @@ void ProcessCommand() {
 }
 
 void SerialInit() {
-  Serial.begin(115200);
-  Serial.setRxBufferSize(4*1024); // Enough to hold 30ms worth of serial data.
+  Serial.begin(BaudRate);
+  Serial.setRxBufferSize(SerialRxBufferSize); // Enough to hold 30ms worth of serial data.
   Serial.println(F("Startup!"));
   bufP = inputBuffer;
   lineTooLong = false;
@@ -1065,6 +1067,7 @@ void setup() {
 void loop() {
   uint32_t loop_epoch = millis();
   uint32_t next_loop = PowerUpdate();
+  static uint32_t loop_overflow_millis = 0;
 
   // Handle button presses.
   static TouchButtonControler<kTouch0Pin> button_0;
@@ -1113,5 +1116,23 @@ void loop() {
   // So we implement that by having the loop run at 30ms, and if we see a CC change,
   // we sample again in 15ms to make sure the value is stable, satisfying both timing
   // requirements.
-  delay(loop_epoch + next_loop - loop_epoch);
+  // We also light up LED#1 for 5 seconds if the main loop overruns its time allotment.
+  // It's meant only for debugging, people will probably not be normally watching this,
+  // so it doesn't matter that the logic implies that the LED might *not* light up
+  // if the overflow is detected exactly at millis() == 0.
+  // We might want to consider logging such events as ASY messages in the future.
+  uint32_t elapsed = millis() - loop_epoch;
+  if (elapsed > next_loop) {
+    loop_overflow_millis = millis();
+  } else {
+    delay(next_loop - elapsed);
+  }
+  if (loop_overflow_millis) {
+    if (millis() - loop_overflow_millis < 5000) {
+      digitalWrite(kOnboardLed1Pin, HIGH);
+    } else {
+      digitalWrite(kOnboardLed1Pin, LOW);
+      loop_overflow_millis = 0;
+    }
+  }
 }
