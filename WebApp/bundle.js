@@ -12014,7 +12014,6 @@ var usbFilter = [{
   usbVendorId: 0x1a86,
   usbProductId: 0x7523
 }];
-_dropzone.Dropzone.prototype.defaultOptions.dictDefaultMessage = "Feed me your " + ROWS + "x" + COLS + " GIF animations!";
 _dropzone.Dropzone.options.gifDropzone = {
   autoProcessQueue: false,
   autoQueue: false,
