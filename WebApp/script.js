@@ -57,8 +57,6 @@ const usbFilter = [
     {usbVendorId: 0x1a86, usbProductId: 0x7523}
 ];
 
-
-Dropzone.prototype.defaultOptions.dictDefaultMessage = "Feed me your " + ROWS + "x" + COLS + " GIF animations!";
 Dropzone.options.gifDropzone = {
     autoProcessQueue: false,
     autoQueue: false,
