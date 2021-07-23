@@ -19,6 +19,9 @@
 
 import "regenerator-runtime/runtime";
 import { parseGIF, decompressFrames } from "gifuct-js";
+import { Dropzone } from "dropzone";
+
+const css = require("./style.css");
 
 let port;
 let reader;
@@ -37,8 +40,7 @@ const ledCBs = document.querySelectorAll('input.led');
 const divLeftBut = document.getElementById('leftBut');
 const divRightBut = document.getElementById('rightBut');
 const butConnect = document.getElementById('butConnect');
-const canvas = new OffscreenCanvas(16,16); // document.getElementById('myCanvas');
-const pixelArt = document.querySelectorAll('img.pixelArt');
+const pixelArtContainer = document.getElementById('pixelArtContainer');
 const gammaSlider = document.getElementById('gammaSlider');
 const gammaDisplay = document.getElementById('gammaDisplay');
 const redCCSlider = document.getElementById('redCCSlider');
@@ -49,10 +51,50 @@ const greenCCSlider = document.getElementById('greenCCSlider');
 const greenCCDisplay = document.getElementById('greenCCDisplay');
 const debugButton = document.getElementById('debugButton');
 const clockButton = document.getElementById('clockButton');
+const gifDropzone = document.getElementById('gif-dropzone');
 
 const usbFilter = [
     {usbVendorId: 0x1a86, usbProductId: 0x7523}
 ];
+
+
+Dropzone.prototype.defaultOptions.dictDefaultMessage = "Feed me your " + ROWS + "x" + COLS + " GIF animations!";
+Dropzone.options.gifDropzone = {
+    autoProcessQueue: false,
+    autoQueue: false,
+    createImageThumbnails: false,
+    accept: function (file, done) {
+	var fr = new FileReader();
+        fr.onload = function () {
+	    var img = document.createElement('img');
+            img.src = fr.result;
+
+	    var oReq = new XMLHttpRequest();
+	    oReq.open('GET', img.src, true);
+	    oReq.responseType = 'arraybuffer';
+	    oReq.onload = function(oEvent) {
+		var arrayBuffer = oReq.response;
+		if (arrayBuffer) {
+		    var gif = parseGIF(arrayBuffer);
+		    if (gif.lsd.width != ROWS || gif.lsd.height != COLS) {
+			console.log(file.name + ": only " + ROWS + "x" + COLS + " GIF supported");
+			return;
+		    }
+		    img.className = "pixelArt";
+		    initPixelArtImage(img);
+		    pixelArtContainer.appendChild(img);
+		}
+	    }
+	    oReq.send(null)
+        }
+        fr.readAsDataURL(file);
+	Dropzone.forElement('#gif-dropzone').removeFile(file);
+	done();
+    },
+    init: function () {
+	console.log("Dropzone init!")
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     butConnect.addEventListener('click', clickConnect);
@@ -60,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const notSupported = document.getElementById('notSupported');
     notSupported.classList.toggle('hidden', 'serial' in navigator);
     initCheckboxes();
-    initPixelArt();
+    document.querySelectorAll('img.pixelArt').forEach(initPixelArtImage);
     initGamma();
     debugButton.onclick = function() { if (port) writeToStream('DBG'); };
     clockButton.onclick = function() { drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]); };
@@ -315,16 +357,12 @@ function initCheckboxes() {
     });
 }
 
-function initPixelArt() {
-    pixelArt.forEach((img) => {
-	var ctx = canvas.getContext('2d');
-	img.crossOrigin = "Anonymous";
-	ctx.drawImage(img, 0, 0);
-	img.onclick = function() {
-	    if (port) sendGifAnimation(img);
-	    currentImage = img;
-	};
-    });
+function initPixelArtImage(img) {
+    img.crossOrigin = "Anonymous";
+    img.onclick = function() {
+	if (port) sendGifAnimation(img);
+	currentImage = img;
+    }
 }
 
 function updateGammaDisplay() {

@@ -354,13 +354,16 @@
             <td id="blueCCDisplay"></td></tr>
         </table>
       </div>
-      <div class="pixelArtContainer">
+      <div class="pixelArtContainer" id="pixelArtContainer">
         <img src="pixelart/cherry.gif" class="pixelArt"/>
         <img src="pixelart/honey.gif" class="pixelArt"/>
         <img src="pixelart/pancakes.gif" class="pixelArt"/>
         <img src="pixelart/watermelon.gif" class="pixelArt"/>
         <img src="pixelart/pulsar.gif" class="pixelArt"/>
       </div>
+      <form action="/fake" class="dropzone" id="gif-dropzone">
+        <div class="dz-message" data-dz-message><span>Feed me your 16x16 GIF animations!</span></div>
+      </form>
       <div>
         <button type="button" id="debugButton">Debug</button>
         <button type="button" id="clockButton">Clock</button>
