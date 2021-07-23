@@ -6,6 +6,8 @@
     "dependencies": {
         "@babel/preset-env": "^7.14.4",
         "browserify": "^17.0.0",
+        "browserify-css": "^0.15.0",
+        "dropzone": "^5.9.2",
         "gifuct-js": "^2.1.1",
         "watchify": "^4.0.0"
     },
@@ -26,7 +28,7 @@
         ]
     },
     "scripts": {
-        "build": "browserify script.js -o bundle.js",
+        "build": "browserify -t browserify-css script.js -o bundle.js; ",
         "watch": "watchify script.js -o bundle.js -v",
         "test": "echo \"Error: no test specified\" && exit 1"
     },

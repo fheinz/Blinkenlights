@@ -339,28 +339,31 @@
           <tr>
             <th>Gamma:</th>
             <td><input type="range" min="0" max="100" value="70" class="slider" id="gammaSlider"></td>
-            <td id="gammaDisplay"></td>
+            <td id="gammaDisplay"></td></tr>
           <tr>
             <th>Red:</th>
             <td><input type="range" min="0" max="100" value="70" class="slider" id="redCCSlider"></td>
-            <td id="redCCDisplay"></td>
+            <td id="redCCDisplay"></td></tr>
           <tr>
             <th>Green:</th>
             <td><input type="range" min="0" max="100" value="70" class="slider" id="greenCCSlider"></td>
-            <td id="greenCCDisplay"></td>
+            <td id="greenCCDisplay"></td></tr>
           <tr>
             <th>Blue:</th>
             <td><input type="range" min="0" max="100" value="70" class="slider" id="blueCCSlider"></td>
-            <td id="blueCCDisplay"></td>
-          </tr>
+            <td id="blueCCDisplay"></td></tr>
+        </table>
       </div>
-      <div class="pixelArtContainer">
+      <div class="pixelArtContainer" id="pixelArtContainer">
         <img src="pixelart/cherry.gif" class="pixelArt"/>
         <img src="pixelart/honey.gif" class="pixelArt"/>
         <img src="pixelart/pancakes.gif" class="pixelArt"/>
         <img src="pixelart/watermelon.gif" class="pixelArt"/>
         <img src="pixelart/pulsar.gif" class="pixelArt"/>
       </div>
+      <form action="/fake" class="dropzone" id="gif-dropzone">
+        <div class="dz-message" data-dz-message><span>Feed me your 16x16 GIF animations!</span></div>
+      </form>
       <div>
         <button type="button" id="debugButton">Debug</button>
         <button type="button" id="clockButton">Clock</button>
