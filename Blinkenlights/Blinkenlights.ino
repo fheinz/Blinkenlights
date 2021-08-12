@@ -306,7 +306,7 @@ uint32_t PowerUpdate() {
  * A LED matrix that can display frames.
  */
 enum MatrixRotation { k000, k090, k180, k270, kNumRotations };
-constexpr char MatrixRotationPrefsKey[] = "PowerOverride";
+constexpr char MatrixRotationPrefsKey[] = "MatrixRotation";
 template <size_t width, size_t height, uint8_t pin> class LedMatrix {
   private:
     static const size_t numLEDs = width * height;
@@ -329,12 +329,11 @@ template <size_t width, size_t height, uint8_t pin> class LedMatrix {
       transposers[MatrixRotation::k090] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair(p.second, (width-1)-p.first); });
       transposers[MatrixRotation::k180] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair((width-1)-p.first, (height-1)-p.second); });
       transposers[MatrixRotation::k270] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair((height-1)-p.second, p.first); });
-      setRotation((MatrixRotation)preferences.getUInt(MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
+      setRotation(MatrixRotation::k000);
     }
 
     void setRotation(MatrixRotation r) {
       rotation = r;
-      preferences.putUInt(MatrixRotationPrefsKey, (uint8_t)r);
     }
 
     void clear() {
@@ -935,6 +934,7 @@ void ProcessCommand() {
         Comm().println(F("NAK ROT ARG"));
         return;
       }
+      preferences.putUInt(MatrixRotationPrefsKey, (uint8_t)rotation);
       display.setRotation(rotation);
       inputBuffer[7] = '\0';
       Comm().print(F("ACK ROT "));
@@ -1097,6 +1097,7 @@ void setup() {
   preferences.begin("Blinkenlights", false);
   GetPowerOverride();
   display.clear();
+  display.setRotation((MatrixRotation)preferences.getUInt(MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
   FramesReset();
   AnimationsReset();
   SerialInit();
