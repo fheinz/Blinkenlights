@@ -36,7 +36,8 @@ food](https://henrysoftware.itch.io/pixel-food) collection.
 The WebApp allows you to interact with the display from your browser. Two
 caveats:
 
-* it requires Chrome, because other browsers don't support WebSerial (yet?)
+* it requires a browser with WebSerial support. Chrome works, and so should Edge
+  and Opera, but I haven't tested them.
 * it won't work if you just load Webapp/index.html from the disk: WebSerial will
   not get access to the port unless the page has been loaded over HTTP.
 
