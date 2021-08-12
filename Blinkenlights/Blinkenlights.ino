@@ -305,9 +305,16 @@ uint32_t PowerUpdate() {
 /*
  * A LED matrix that can display frames.
  */
-template <size_t matrixSize, uint8_t pin> class LedMatrix {
+enum MatrixRotation { k000, k090, k180, k270, kNumRotations };
+constexpr char MatrixRotationPrefsKey[] = "PowerOverride";
+template <size_t width, size_t height, uint8_t pin> class LedMatrix {
   private:
-    CRGB leds[matrixSize];
+    static const size_t numLEDs = width * height;
+    typedef std::pair<unsigned int, unsigned int> CoordinatePair;
+    typedef std::function<CoordinatePair(CoordinatePair)> Transposer;
+    CRGB leds[numLEDs];
+    MatrixRotation rotation;
+    Transposer *transposers[MatrixRotation::kNumRotations];
 
   public:
     LedMatrix() {
@@ -315,25 +322,38 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
     }
 
     void init() {
-      FastLED.addLeds<NEOPIXEL, pin>(leds, matrixSize);
+      FastLED.addLeds<NEOPIXEL, pin>(leds, numLEDs);
       FastLED.setBrightness(15);
       FastLED.setDither(BINARY_DITHER);
+      transposers[MatrixRotation::k000] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return p; });
+      transposers[MatrixRotation::k090] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair(p.second, (width-1)-p.first); });
+      transposers[MatrixRotation::k180] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair((width-1)-p.first, (height-1)-p.second); });
+      transposers[MatrixRotation::k270] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair((height-1)-p.second, p.first); });
+      setRotation((MatrixRotation)preferences.getUInt(MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
+    }
+
+    void setRotation(MatrixRotation r) {
+      rotation = r;
+      preferences.putUInt(MatrixRotationPrefsKey, (uint8_t)r);
     }
 
     void clear() {
       FastLED.clear();
       FastLED.show();
     }
-  
+
     void show(const AnimationFrame &f) {
       show(f.pixels);
     }
 
     void show(const FramePixels pixels) {
       FastLED.clear();
-      for (int line = 0; line < kLedMatrixNumLines; line++) {
-        for (int col = 0; col < kLedMatrixNumCols; col++) {
-          int tgt_index = line * kLedMatrixNumCols + (line % 2 ? col : (kLedMatrixNumCols - 1) - col);
+      Transposer *transpose = transposers[rotation];
+      for (int line = 0; line < height; line++) {
+        for (int col = 0; col < width; col++) {
+          CoordinatePair transposed = (*transpose)(CoordinatePair(col, line));
+          int tgt_index = transposed.second * width +
+            (transposed.second % 2 ? transposed.first : (width - 1) - transposed.first);
           leds[tgt_index] = CRGB(pixels[0], pixels[1], pixels[2]);  
           pixels += 3;
         }
@@ -343,7 +363,7 @@ template <size_t matrixSize, uint8_t pin> class LedMatrix {
 };
 
 
-LedMatrix<kLedMatrixNumLeds, kLedMatrixDataPin> display;
+LedMatrix<kLedMatrixNumCols, kLedMatrixNumLines, kLedMatrixDataPin> display;
 
 /*
  * The frames pool.
@@ -901,7 +921,26 @@ void ProcessCommand() {
       ReportPower(PowerOverride);
       return;
     }
-    return;
+    if (l == 7 && !strncmp("ROT ", inputBuffer, 4)) {
+      MatrixRotation rotation;
+      if (!strncmp("000", inputBuffer+4, 3)) {
+        rotation = MatrixRotation::k000;
+      } else if (!strncmp("090", inputBuffer+4, 3)) {
+        rotation = MatrixRotation::k090;
+      } else if (!strncmp("180", inputBuffer+4, 3)) {
+        rotation = MatrixRotation::k180;
+      } else if (!strncmp("270", inputBuffer+4, 3)) {
+        rotation = MatrixRotation::k270;
+      } else {
+        Comm().println(F("NAK ROT ARG"));
+        return;
+      }
+      display.setRotation(rotation);
+      inputBuffer[7] = '\0';
+      Comm().print(F("ACK ROT "));
+      Comm().println(inputBuffer+4);
+      return;
+    }
   }
   if (l == 3) {
     if (!strncmp("VER", inputBuffer, 3)) {
