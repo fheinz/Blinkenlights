@@ -36,6 +36,16 @@ constexpr int kTouch0Pin = 15;
 constexpr int kTouch1Pin = 2;
 constexpr int kTouch2Pin = 4;
 
+constexpr int kPowerLedPin = kOnboardLed0Pin;
+constexpr int kPowerLedPwmChannel = 0;
+constexpr int kPowerLedPwmFrequency = 4000;
+constexpr int kPowerLedPwmResolution = 8;
+constexpr int kMaxPowerLedBrightness = 255/2;
+constexpr int kPowerLedBreathDuration = 3000;
+constexpr float kPowerLedBreathBeta = 0.5;
+constexpr float kPowerLedBreathGamma = 0.14;
+
+
 Preferences preferences;
 
 enum class UsbCurrentAvailable {
@@ -296,9 +306,16 @@ uint32_t PowerUpdate() {
     currentAvailableDetected = current_advertisement;
     nextLoop = 15;
   }
-  digitalWrite(kOnboardLed0Pin,
-               currentAvailable == UsbCurrentAvailable::k3A ||
-               currentAvailable == UsbCurrentAvailable::k1_5A && (millis()/500)%2 ? HIGH : LOW);
+  if (currentAvailable == UsbCurrentAvailable::k3A)
+    ledcWrite(kPowerLedPwmChannel, kMaxPowerLedBrightness);
+  else if (currentAvailable == UsbCurrentAvailable::k1_5A) {
+    float phase = ((float)(millis() % kPowerLedBreathDuration))/kPowerLedBreathDuration;
+    float numerator = (phase-kPowerLedBreathBeta)/kPowerLedBreathGamma;
+    numerator *= numerator;
+    float gauss = exp(-numerator/2.0);
+    int brightness = (int)(gauss*kMaxPowerLedBrightness);
+    ledcWrite(kPowerLedPwmChannel, brightness);
+  }
   return nextLoop;
 }
 
@@ -1086,7 +1103,8 @@ template <int kInputPin>
  * And the usual Arduino song and dance.
  */
 void setup() {
-  pinMode(kOnboardLed0Pin, OUTPUT);
+  ledcAttachPin(kPowerLedPin, kPowerLedPwmChannel);
+  ledcSetup(kPowerLedPwmChannel, kPowerLedPwmFrequency, kPowerLedPwmResolution);
   pinMode(kOnboardLed1Pin, OUTPUT);
   pinMode(kLedMatrixDataPin, OUTPUT);
   pinMode(kLedMatrixPowerPin0, OUTPUT);
