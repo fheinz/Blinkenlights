@@ -40,7 +40,9 @@ constexpr int kPowerLedPin = kOnboardLed0Pin;
 constexpr int kPowerLedPwmChannel = 0;
 constexpr int kPowerLedPwmFrequency = 4000;
 constexpr int kPowerLedPwmResolution = 8;
-constexpr int kMaxPowerLedBrightness = 255/2;
+constexpr int kFullPowerLedBrightness = 255;
+constexpr int kMaxPowerLedBrightness = 3 * kFullPowerLedBrightness / 4;
+constexpr int kMinPowerLedBrightness = kFullPowerLedBrightness / 4;
 constexpr int kPowerLedBreathDuration = 3000;
 constexpr float kPowerLedBreathBeta = 0.5;
 constexpr float kPowerLedBreathGamma = 0.14;
@@ -309,11 +311,11 @@ uint32_t PowerUpdate() {
   if (currentAvailable == UsbCurrentAvailable::k3A)
     ledcWrite(kPowerLedPwmChannel, kMaxPowerLedBrightness);
   else if (currentAvailable == UsbCurrentAvailable::k1_5A) {
-    float phase = ((float)(millis() % kPowerLedBreathDuration))/kPowerLedBreathDuration;
-    float numerator = (phase-kPowerLedBreathBeta)/kPowerLedBreathGamma;
-    numerator *= numerator;
-    float gauss = exp(-numerator/2.0);
-    int brightness = (int)(gauss*kMaxPowerLedBrightness);
+    float phase = ((float)(millis() % kPowerLedBreathDuration)) / kPowerLedBreathDuration;
+    float sqrt_numerator = (phase - kPowerLedBreathBeta) / kPowerLedBreathGamma;
+    float ln_brightness = -sqrt_numerator * sqrt_numerator / 2.0;
+    float gauss = exp(ln_brightness);
+    int brightness = kMinPowerLedBrightness + (int)(gauss * (kMaxPowerLedBrightness - kMinPowerLedBrightness));
     ledcWrite(kPowerLedPwmChannel, brightness);
   }
   return nextLoop;
