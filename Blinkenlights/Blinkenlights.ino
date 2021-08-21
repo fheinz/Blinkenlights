@@ -16,13 +16,12 @@
  *
  */
 
+#include <BluetoothSerial.h>
+#include <FastLED.h>
 #include <Preferences.h>
+#include <Stream.h>
 
-#include <cctype>
-
-#include "BluetoothSerial.h"
-#include "FastLED.h"  // Fastled library to control the LEDs
-#include "Stream.h"
+#include "util.h"
 
 constexpr int BaudRate = 115200;
 constexpr int SerialRxBufferSize = 4 * 1024;
@@ -130,65 +129,6 @@ enum class ErrorCode {
   kAddInvalidFrameToAnimation,
 };
 void CantHappen(const ErrorCode err) {}
-
-/*
- * Parse a substring into an unsigned int 32 using decimal
- * representation.
- *
- * Parameters:
- *    i:    pointer to unsigned int for the result
- *    from: start of the string representation
- *    to:   end of the string representation
- *
- * Returns true if successful, false if the substring contains
- * at least one non-decimal digit.
- */
-bool ParseUInt32(uint32_t *i, const char *from, const char *to) {
-  uint32_t acc = 0;
-  while (from < to) {
-    char c = *from++;
-    if (!isdigit(c)) return false;
-    acc = acc * 10 + (c - '0');
-  }
-  *i = acc;
-  return true;
-}
-
-/*
- * Parse a substring into an array of bytes using hexadecimal
- * representation.
- *
- * Parameters:
- *    buf:  pointer to byte array for the result;
- *          must be large enough to hold the bytes
- *    from: start of the string representation
- *    to:   end of the string representation
- *
- * Returns true if successful, false if the substring contains
- * at least one non-hex digit.
- */
-bool ParseHex(uint8_t *buf, const char *from, const char *to) {
-  bool half = false;
-  while (from < to) {
-    char c = *from++;
-    uint8_t d;
-    if (isdigit(c)) {
-      d = c - '0';
-    } else if (isxdigit(c)) {
-      d = (c + 10 - 'A');
-    } else {
-      return false;
-    }
-    if (half) {
-      *buf |= d;
-      buf++;
-    } else {
-      *buf = d << 4;
-    }
-    half = !half;
-  }
-  return true;
-}
 
 /*
  * Read voltage at an input pin.
@@ -820,7 +760,8 @@ void ProcessCommand() {
   if (l > 4) {
     if (!strncmp((const char *)F("CLC "), inputBuffer, 4)) {
       CRGB c;
-      if (!ParseHex(reinterpret_cast<uint8_t *>(&c), inputBuffer + 4, bufP)) {
+      if (!blink::util::ParseHex(reinterpret_cast<uint8_t *>(&c),
+                                 inputBuffer + 4, bufP)) {
         Comm().println(F("NAK CLC ARG"));
         return;
       }
@@ -833,7 +774,7 @@ void ProcessCommand() {
     }
     if (!strncmp("DIM ", inputBuffer, 4)) {
       uint32_t b;
-      if (!ParseUInt32(&b, inputBuffer + 4, bufP) || b > 255) {
+      if (!blink::util::ParseUInt32(&b, inputBuffer + 4, bufP) || b > 255) {
         Comm().println(F("NAK DIM ARG"));
         return;
       }
@@ -866,9 +807,10 @@ void ProcessCommand() {
         return;
       }
       if (l != BUFLEN ||
-          !ParseHex(&(frames[frameInProgress]
-                          .pixels[frameInProgressLine * 3 * kLedMatrixNumCols]),
-                    inputBuffer + 4, bufP)) {
+          !blink::util::ParseHex(
+              &(frames[frameInProgress]
+                    .pixels[frameInProgressLine * 3 * kLedMatrixNumCols]),
+              inputBuffer + 4, bufP)) {
         Comm().println(F("NAK RGB ARG"));
         return;
       }
@@ -879,7 +821,7 @@ void ProcessCommand() {
     }
     if (!strncmp("FRM ", inputBuffer, 4)) {
       Duration d;
-      if (!ParseUInt32(&d, inputBuffer + 4, bufP)) {
+      if (!blink::util::ParseUInt32(&d, inputBuffer + 4, bufP)) {
         Comm().println(F("NAK FRM ARG"));
         return;
       }
@@ -896,7 +838,7 @@ void ProcessCommand() {
     }
     if (!strncmp("ANM ", inputBuffer, 4)) {
       Duration d;
-      if (!ParseUInt32(&d, inputBuffer + 4, bufP)) {
+      if (!blink::util::ParseUInt32(&d, inputBuffer + 4, bufP)) {
         Comm().println(F("NAK ANM ARG"));
         return;
       }
