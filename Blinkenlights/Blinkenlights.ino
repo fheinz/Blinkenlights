@@ -16,6 +16,8 @@
  *
  */
 
+#include <cctype>
+
 #include "BluetoothSerial.h"
 #include "FastLED.h"       // Fastled library to control the LEDs
 #include "Stream.h"
@@ -130,14 +132,6 @@ enum class ErrorCode {
 };
 void CantHappen(const ErrorCode err) {}
 
-
-/*
- * String --> integer parsing utility functions
- */
-
-inline bool isdigit(char c) { return c >= '0' && c <= '9'; }
-inline bool ishexdigit(char c) { return c >= 'A' && c <= 'F'; }
-
 /*
  * Parse a substring into an unsigned int 32 using decimal
  * representation.
@@ -182,7 +176,7 @@ bool ParseHex(uint8_t *buf, const char *from, const char *to) {
     uint8_t d;
     if (isdigit(c)) {
       d = c -'0';
-    } else if (ishexdigit(c)) {
+    } else if (isxdigit(c)) {
       d = (c + 10 - 'A');
     } else {
       return false;
