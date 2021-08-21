@@ -15,7 +15,7 @@ The `ESP32` core package comes with a lot of board definitions, among which is
 use.
 
 ```
-$ arduino-cli compile -b esp32:esp32:esp32 --outputdir=./ ./Blinkenlights.ino
+$ arduino-cli compile -b esp32:esp32:esp32 --output-dir=./ ./Blinkenlights.ino
 ```
 
 This should produce multiple files, out of which only `Blinkenlights.ino.bin` is
