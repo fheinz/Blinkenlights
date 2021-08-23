@@ -279,63 +279,6 @@ class LedMatrix {
 
 LedMatrix<kLedMatrixNumCols, kLedMatrixNumLines, kLedMatrixDataPin> display;
 
-/*
- * Protocol parser & dispatcher
- *
- * General flow of communications:
- *    --> <CMD>[ <ARGS>...]
- *    <-- (ACK|NAK) CMD[ <ARGS>...| <CAUSE>]
- *
- * Format is strict: commands are three letters, only one space between command,
- * and arguments, everything is case sensitive.
- *
- * Commands:
- *    VER               query firmware version
- *    FRE               query free animation and frame slots
- *    QUE               query animation queue
- *    RST               reset all device data
- *    DBG               dump select engine data for debugging
- *    CLC <RGB>         white color correction point as 3 8-bit hex values
- *    DIM <0..255>      brightness value
- *    DTH ON|OFF        brightness dithering
- *    RGB <RGB STRING>  RGB values for one row (16x3 8-bit hex values) of a
- * frame FRM <MILLIS>      start a frame to display for <MILLIS>ms ANM <MILLIS>
- * start an animation to display for <MILLIS>ms DON               wrap up and
- * enqueue animation NXT               immediately terminate current animation
- * and start the next
- *
- * Example conversation:
- *   --> VER
- *   <-- 1.0
- *   --> ANM 60000
- *   <-- SBY ANM
- *   --> FRM 500
- *   <-- SBY FRM
- *   --> RGB 00FF8800...
- *   <-- ACK RGB 0
- *   --> RGB ...
- *   <-- ACK RGB 1
- *   ...
- *   --> FRM 500
- *   <-- SBY FRM
- *   --> RGB 00FF8800...
- *   <-- ACK RGB
- *   --> RGB ...
- *   ...
- *   --> DNE
- *   <-- ACK ANM
- *   --> QUE
- *   <-- QUE 3725 40000 60000
- *   --> FRE
- *   <-- FRE 2 12
- *   --> RST
- *   <-- ACK RST
- */
-#define BUFLEN 100
-char inputBuffer[BUFLEN];
-char *bufP;
-bool lineTooLong;
-
 blink::animation::Animator<32, 16, kLedMatrixNumCols, kLedMatrixNumLines>
     animator(millis);
 
@@ -523,6 +466,65 @@ void ReportPower(UsbCurrentAvailable pwr) {
   }
 }
 
+/*
+ * Protocol parser & dispatcher
+ *
+ * General flow of communications:
+ *    --> <CMD>[ <ARGS>...]
+ *    <-- (ACK|NAK) CMD[ <ARGS>...| <CAUSE>]
+ *
+ * Format is strict: commands are three letters, only one space between command,
+ * and arguments, everything is case sensitive.
+ *
+ * Commands:
+ *    VER               query firmware version
+ *    FRE               query free animation and frame slots
+ *    QUE               query animation queue
+ *    RST               reset all device data
+ *    DBG               dump select engine data for debugging
+ *    CLC <RGB>         white color correction point as 3 8-bit hex values
+ *    DIM <0..255>      brightness value
+ *    DTH ON|OFF        brightness dithering
+ *    RGB <RGB STRING>  RGB values for one row (16x3 8-bit hex values) of a
+ * frame FRM <MILLIS>      start a frame to display for <MILLIS>ms ANM <MILLIS>
+ * start an animation to display for <MILLIS>ms DON               wrap up and
+ * enqueue animation NXT               immediately terminate current animation
+ * and start the next
+ *
+ * Example conversation:
+ *   --> VER
+ *   <-- 1.0
+ *   --> ANM 60000
+ *   <-- SBY ANM
+ *   --> FRM 500
+ *   <-- SBY FRM
+ *   --> RGB 00FF8800...
+ *   <-- ACK RGB 0
+ *   --> RGB ...
+ *   <-- ACK RGB 1
+ *   ...
+ *   --> FRM 500
+ *   <-- SBY FRM
+ *   --> RGB 00FF8800...
+ *   <-- ACK RGB
+ *   --> RGB ...
+ *   ...
+ *   --> DNE
+ *   <-- ACK ANM
+ *   --> QUE
+ *   <-- QUE 3725 40000 60000
+ *   --> FRE
+ *   <-- FRE 2 12
+ *   --> RST
+ *   <-- ACK RST
+ */
+#define BUFLEN 100
+char inputBuffer[BUFLEN];
+char *bufP;
+bool lineTooLong;
+
+constexpr char ColorCorrectionPrefsKey[] = "ColorCorrection";
+
 void ProcessCommand() {
   static blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines>
       *frame_being_loaded = nullptr;
@@ -539,6 +541,7 @@ void ProcessCommand() {
         Comm().println(F("NAK CLC ARG"));
         return;
       }
+      preferences.putUInt(ColorCorrectionPrefsKey, (c.red<<16)|(c.green<<8)|c.blue);
       FastLED.setCorrection(c);
       Comm().print(F("ACK CLC "));
       Comm().print(c.red, HEX);
@@ -775,6 +778,7 @@ void setup() {
   pinMode(kTouch2Pin, INPUT);
   preferences.begin("Blinkenlights", false);
   GetPowerOverride();
+  FastLED.setCorrection(CRGB(preferences.getUInt(ColorCorrectionPrefsKey, LEDColorCorrection::Typical8mmPixel)));
   display.clear();
   display.setRotation((MatrixRotation)preferences.getUInt(
       MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
