@@ -158,7 +158,7 @@ void EnableLEDPower() {
   // Enable 1.5A current to charge up the capacitances.
   digitalWrite(kLedMatrixPowerPin0, HIGH);
 
-  delay(50);
+  FastLED.delay(50);
 
   // Enable the second 1.5A switch to reduce switch resistance
   // even if we only have 1.5A total, because we can limit it in
@@ -243,7 +243,7 @@ class LedMatrix {
   void init() {
     FastLED.addLeds<NEOPIXEL, pin>(leds, kNumLEDs);
     FastLED.setBrightness(15);
-    FastLED.setDither(BINARY_DITHER);
+    FastLED.setDither(DISABLE_DITHER);
     transposers[MatrixRotation::k000] =
         new Transposer([](CoordinatePair p) -> CoordinatePair { return p; });
     transposers[MatrixRotation::k090] =
@@ -844,7 +844,7 @@ void loop() {
   if (elapsed > next_loop) {
     loop_overflow_millis = millis();
   } else {
-    delay(next_loop - elapsed);
+    FastLED.delay(next_loop - elapsed);
   }
   if (loop_overflow_millis) {
     if (millis() - loop_overflow_millis < 5000) {
