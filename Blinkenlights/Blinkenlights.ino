@@ -16,10 +16,14 @@
  *
  */
 
-#include "BluetoothSerial.h"
-#include "FastLED.h"       // Fastled library to control the LEDs
-#include "Stream.h"
+#include <BluetoothSerial.h>
+#include <FastLED.h>
 #include <Preferences.h>
+#include <Stream.h>
+
+#include "animator.h"
+#include "frame.h"
+#include "util.h"
 
 constexpr int BaudRate = 115200;
 constexpr int SerialRxBufferSize = 4 * 1024;
@@ -47,7 +51,6 @@ constexpr int kPowerLedBreathDuration = 3000;
 constexpr float kPowerLedBreathBeta = 0.5;
 constexpr float kPowerLedBreathGamma = 0.14;
 
-
 Preferences preferences;
 
 enum class UsbCurrentAvailable {
@@ -68,48 +71,13 @@ enum class UsbCurrentAvailable {
   kUsbStd,
 };
 
-
 // LED Matrix dimensions
 constexpr int kLedMatrixNumCols = 16;
 constexpr int kLedMatrixNumLines = 16;
 constexpr int kLedMatrixNumLeds = kLedMatrixNumCols * kLedMatrixNumLines;
-constexpr float kMatrixMaxCurrent = kLedMatrixNumLeds * 0.06f; // WS2812B: 60mA/LED
-constexpr float kMaxIdleCurrent = 0.5f; // Matrix + ESP32 idle
-
-
-/*
- * Animation frames
- *
- * Each frame contains an array of RGB images representing the image,
- * flattened as a sequence of rows, and a duration for which the image
- * should be shown.
- */
-typedef uint8_t FrameIndex;
-typedef uint32_t Duration;
-typedef uint8_t FramePixels[kLedMatrixNumLeds * 3];
-typedef struct {
-  FramePixels pixels;
-  Duration duration;
-  FrameIndex next;
-} AnimationFrame;
-constexpr FrameIndex kFramesSentinel = 255;
-
-/*
- * Animations
- *
- * Each animation contains the list of frames that make it up,
- * and a total duration for the animation. If the animation's
- * duration is longer than the sum of the frames' durations,
- * it will cycle through them.
- */
-typedef uint8_t AnimationIndex;
-typedef uint8_t AnimationPosition;
-typedef struct {
-  Duration duration;
-  FrameIndex frames;
-  AnimationIndex next;
-} Animation;
-constexpr AnimationIndex kAnimationsSentinel = 255;
+constexpr float kMatrixMaxCurrent =
+    kLedMatrixNumLeds * 0.06f;           // WS2812B: 60mA/LED
+constexpr float kMaxIdleCurrent = 0.5f;  // Matrix + ESP32 idle
 
 /*
  * Called on violation of invariants. May be used for desperate
@@ -130,75 +98,6 @@ enum class ErrorCode {
 };
 void CantHappen(const ErrorCode err) {}
 
-
-/*
- * String --> integer parsing utility functions
- */
-
-inline bool isdigit(char c) { return c >= '0' && c <= '9'; }
-inline bool ishexdigit(char c) { return c >= 'A' && c <= 'F'; }
-
-/*
- * Parse a substring into an unsigned int 32 using decimal
- * representation.
- *
- * Parameters:
- *    i:    pointer to unsigned int for the result
- *    from: start of the string representation
- *    to:   end of the string representation
- *
- * Returns true if successful, false if the substring contains
- * at least one non-decimal digit.
- */
-bool ParseUInt32(uint32_t *i, const char *from, const char *to) {
-  uint32_t acc = 0;
-  while (from < to){
-    char c = *from++;
-    if (!isdigit(c))
-      return false;
-    acc = acc * 10 + (c - '0');
-  }
-  *i = acc;
-  return true;
-}
-
-/*
- * Parse a substring into an array of bytes using hexadecimal
- * representation.
- *
- * Parameters:
- *    buf:  pointer to byte array for the result;
- *          must be large enough to hold the bytes
- *    from: start of the string representation
- *    to:   end of the string representation
- *
- * Returns true if successful, false if the substring contains
- * at least one non-hex digit.
- */
-bool ParseHex(uint8_t *buf, const char *from, const char *to) {
-  bool half = false;
-  while (from < to) {
-    char c = *from++;
-    uint8_t d;
-    if (isdigit(c)) {
-      d = c -'0';
-    } else if (ishexdigit(c)) {
-      d = (c + 10 - 'A');
-    } else {
-      return false;
-    }
-    if (half) {
-      *buf |= d;
-      buf++;
-    } else {
-      *buf = d << 4;
-    }
-    half = !half;
-  }
-  return true;
-}
-
-
 /*
  * Read voltage at an input pin.
  *
@@ -207,9 +106,7 @@ bool ParseHex(uint8_t *buf, const char *from, const char *to) {
  * clamped to Vdd (3.3V) so we will never get a reading above that,
  * but we need to the calculations using 3.96.
  */
-float AnalogReadV(int pin) {
-  return analogRead(pin) * 3.96f / 4096;
-}
+float AnalogReadV(int pin) { return analogRead(pin) * 3.96f / 4096; }
 
 /*
  * Detect USB-C current advertisement according to Universal
@@ -238,8 +135,7 @@ void GetPowerOverride() {
 }
 
 UsbCurrentAvailable DetermineMaxCurrent() {
-  if (PowerOverride != UsbCurrentAvailable::kNone)
-    return PowerOverride;
+  if (PowerOverride != UsbCurrentAvailable::kNone) return PowerOverride;
   float cc1 = AnalogReadV(kUsbCc1Pin);
   float cc2 = AnalogReadV(kUsbCc2Pin);
   float cc = max(cc1, cc2);
@@ -268,7 +164,6 @@ void EnableLEDPower() {
   // even if we only have 1.5A total, because we can limit it in
   // firmware instead.
   digitalWrite(kLedMatrixPowerPin1, HIGH);
-
 }
 
 void DisableLEDPower() {
@@ -288,11 +183,13 @@ uint32_t PowerUpdate() {
     // because those take 10ms max.
     switch (current_advertisement) {
       case UsbCurrentAvailable::k3A:
-        FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) / kMatrixMaxCurrent);
+        FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) /
+                              kMatrixMaxCurrent);
         EnableLEDPower();
         break;
       case UsbCurrentAvailable::k1_5A:
-        FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) / kMatrixMaxCurrent);
+        FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) /
+                              kMatrixMaxCurrent);
         EnableLEDPower();
         break;
       default:
@@ -304,18 +201,22 @@ uint32_t PowerUpdate() {
     currentAvailableDetected = UsbCurrentAvailable::kNone;
     nextLoop = 30;
   } else {
-    // We just detected this change... check back in 15ms to see if it's still there.
+    // We just detected this change... check back in 15ms to see if it's still
+    // there.
     currentAvailableDetected = current_advertisement;
     nextLoop = 15;
   }
-  if (currentAvailable == UsbCurrentAvailable::k3A)
+  if (currentAvailable == UsbCurrentAvailable::k3A) {
     ledcWrite(kPowerLedPwmChannel, kMaxPowerLedBrightness);
-  else if (currentAvailable == UsbCurrentAvailable::k1_5A) {
-    float phase = ((float)(millis() % kPowerLedBreathDuration)) / kPowerLedBreathDuration;
+  } else if (currentAvailable == UsbCurrentAvailable::k1_5A) {
+    float phase = static_cast<float>(millis() % kPowerLedBreathDuration) /
+                  kPowerLedBreathDuration;
     float sqrt_numerator = (phase - kPowerLedBreathBeta) / kPowerLedBreathGamma;
     float ln_brightness = -sqrt_numerator * sqrt_numerator / 2.0;
     float gauss = exp(ln_brightness);
-    int brightness = kMinPowerLedBrightness + (int)(gauss * (kMaxPowerLedBrightness - kMinPowerLedBrightness));
+    int brightness = kMinPowerLedBrightness +
+                     static_cast<int>(gauss * (kMaxPowerLedBrightness -
+                                               kMinPowerLedBrightness));
     ledcWrite(kPowerLedPwmChannel, brightness);
   }
   return nextLoop;
@@ -326,249 +227,62 @@ uint32_t PowerUpdate() {
  */
 enum MatrixRotation { k000, k090, k180, k270, kNumRotations };
 constexpr char MatrixRotationPrefsKey[] = "MatrixRotation";
-template <size_t width, size_t height, uint8_t pin> class LedMatrix {
+template <size_t width, size_t height, uint8_t pin>
+class LedMatrix {
  private:
-  static const size_t numLEDs = width * height;
+  static const size_t kNumLEDs = width * height;
   typedef std::pair<unsigned int, unsigned int> CoordinatePair;
   typedef std::function<CoordinatePair(CoordinatePair)> Transposer;
-  CRGB leds[numLEDs];
+  CRGB leds[kNumLEDs];
   MatrixRotation rotation;
   Transposer *transposers[MatrixRotation::kNumRotations];
 
  public:
-  LedMatrix() {
-    init();
-  }
+  LedMatrix() { init(); }
 
   void init() {
-    FastLED.addLeds<NEOPIXEL, pin>(leds, numLEDs);
+    FastLED.addLeds<NEOPIXEL, pin>(leds, kNumLEDs);
     FastLED.setBrightness(15);
     FastLED.setDither(BINARY_DITHER);
-    transposers[MatrixRotation::k000] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return p; });
-    transposers[MatrixRotation::k090] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair(p.second, (width-1)-p.first); });
-    transposers[MatrixRotation::k180] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair((width-1)-p.first, (height-1)-p.second); });
-    transposers[MatrixRotation::k270] = new Transposer([](CoordinatePair p) -> CoordinatePair{ return CoordinatePair((height-1)-p.second, p.first); });
+    transposers[MatrixRotation::k000] =
+        new Transposer([](CoordinatePair p) -> CoordinatePair { return p; });
+    transposers[MatrixRotation::k090] =
+        new Transposer([](CoordinatePair p) -> CoordinatePair {
+          return CoordinatePair(p.second, (width - 1) - p.first);
+        });
+    transposers[MatrixRotation::k180] =
+        new Transposer([](CoordinatePair p) -> CoordinatePair {
+          return CoordinatePair((width - 1) - p.first, (height - 1) - p.second);
+        });
+    transposers[MatrixRotation::k270] =
+        new Transposer([](CoordinatePair p) -> CoordinatePair {
+          return CoordinatePair((height - 1) - p.second, p.first);
+        });
     setRotation(MatrixRotation::k000);
   }
 
-  void setRotation(MatrixRotation r) {
-    rotation = r;
-  }
+  void setRotation(MatrixRotation r) { rotation = r; }
 
   void clear() {
     FastLED.clear();
     FastLED.show();
   }
 
-  void show(const AnimationFrame &f) {
-    show(f.pixels);
-  }
-
-  void show(const FramePixels pixels) {
+  void show(const blink::animation::Frame<width, height> &frame) {
     FastLED.clear();
     Transposer *transpose = transposers[rotation];
-    for (int line = 0; line < height; line++) {
-      for (int col = 0; col < width; col++) {
-        CoordinatePair transposed = (*transpose)(CoordinatePair(col, line));
-        int tgt_index = transposed.second * width +
-                        (transposed.second % 2 ? transposed.first : (width - 1) - transposed.first);
-        leds[tgt_index] = CRGB(pixels[0], pixels[1], pixels[2]);
-        pixels += 3;
-      }
-    }
+    frame.CopyToFastLedDisplay([&](size_t y, size_t x, const CRGB &rgb) {
+      CoordinatePair transposed = (*transpose)(CoordinatePair(x, y));
+      int tgt_index = transposed.second * width +
+                      (transposed.second % 2 ? transposed.first
+                                             : (width - 1) - transposed.first);
+      leds[tgt_index] = rgb;
+    });
     FastLED.show();
   }
 };
 
-
 LedMatrix<kLedMatrixNumCols, kLedMatrixNumLines, kLedMatrixDataPin> display;
-
-/*
- * The frames pool.
- */
-constexpr int kMaxNumFrames = 32;
-AnimationFrame frames[kMaxNumFrames];
-FrameIndex freeFrames;
-uint8_t numFreeFrames;
-
-void FramesReset() {
-  for (int i = 0; i < kMaxNumFrames-1; i++) {
-    frames[i].next = i+1;
-  }
-  frames[kMaxNumFrames-1].next = kFramesSentinel;
-  freeFrames = (FrameIndex)0;
-  numFreeFrames = kMaxNumFrames;
-}
-
-FrameIndex FramesGetFrame() {
-  FrameIndex f = freeFrames;
-  if (f != kFramesSentinel) {
-    freeFrames = frames[f].next;
-    frames[f].next = kFramesSentinel;
-    numFreeFrames--;
-  }
-  return f;
-}
-
-
-void FramesFreeFrames(FrameIndex f) {
-  while (f != kFramesSentinel) {
-    if (f >= kMaxNumFrames) {
-      CantHappen(ErrorCode::kInvalidFrameIndex);
-    }
-    FrameIndex n = frames[f].next;
-    frames[f].next = freeFrames;
-    freeFrames = f;
-    f = n;
-    numFreeFrames++;
-  }
-}
-
-
-int FramesCountFrames(FrameIndex f) {
-  int count = 0;
-
-  while (f != kFramesSentinel) {
-    count++;
-    f = frames[f].next;
-  }
-  return count;
-}
-
-
-/*
- * The animations pool.
- */
-constexpr int kMaxNumAnimations = 16;
-Animation animations[kMaxNumAnimations];
-AnimationIndex freeAnimations;
-uint8_t numFreeAnimations;
-AnimationIndex liveAnimations;
-uint8_t numLiveAnimations;
-
-void AnimationsReset() {
-  for (int i = 0; i < kMaxNumAnimations-1; i++) {
-    animations[i].next = i+1;
-  }
-  animations[kMaxNumAnimations-1].next = kAnimationsSentinel;
-  freeAnimations = (AnimationIndex)0;
-  liveAnimations = kAnimationsSentinel;
-  numFreeAnimations = kMaxNumAnimations;
-  numLiveAnimations = 0;
-}
-
-AnimationIndex AnimationsGetAnimation() {
-  AnimationIndex a = freeAnimations;
-  if (a != kAnimationsSentinel) {
-    freeAnimations = animations[a].next;
-    numFreeAnimations--;
-    animations[a].duration = 0;
-    animations[a].frames = kFramesSentinel;
-    animations[a].next = kAnimationsSentinel;
-  }
-  return a;
-}
-
-void AnimationsFreeAnimation(AnimationIndex a) {
-  while (a != kAnimationsSentinel) {
-    if (a >= kMaxNumAnimations) {
-      CantHappen(ErrorCode::kEnqueueInvalidAnimation);
-    }
-    FramesFreeFrames(animations[a].frames);
-    animations[a].frames = kFramesSentinel;
-    AnimationIndex n = animations[a].next;
-    animations[a].next = freeAnimations;
-    freeAnimations = a;
-    a = n;
-    numFreeAnimations++;
-  }
-}
-
-/*
- * Building/enqueueing/destroying animations.
- */
-void AnimationsAddFrame(AnimationIndex a, FrameIndex f) {
-  if (a == kAnimationsSentinel) {
-    CantHappen(ErrorCode::kAddFrameToInvalidAnimation);
-    return;
-  }
-  if (f == kFramesSentinel) {
-    CantHappen(ErrorCode::kAddInvalidFrameToAnimation);
-    return;
-  }
-  FrameIndex *cur = &animations[a].frames;
-  while (*cur != kFramesSentinel) {
-    cur = &(frames[*cur].next);
-  }
-  *cur = f;
-  frames[f].next = kFramesSentinel;
-}
-
-void AnimationsEnqueueAnimation(AnimationIndex a) {
-  if (a == kAnimationsSentinel) {
-    CantHappen(ErrorCode::kAddFrameToInvalidAnimation);
-    return;
-  }
-  AnimationIndex *cur = &liveAnimations;
-  while (*cur != kAnimationsSentinel) {
-    cur = &(animations[*cur].next);
-  }
-  animations[a].next = kAnimationsSentinel;
-  *cur = a;
-  numLiveAnimations++;
-}
-
-void AnimationsDequeueAnimation() {
-  AnimationIndex cur = liveAnimations;
-  if (cur == kAnimationsSentinel)
-    return;
-  liveAnimations = animations[cur].next;
-  animations[cur].next = kAnimationsSentinel;
-  numLiveAnimations--;
-  if (liveAnimations == kAnimationsSentinel) {
-    display.clear();
-  }
-  AnimationsFreeAnimation(cur);
-}
-
-/*
- * The animation engine.
- */
-FrameIndex nextFrame;             // Next frame to display
-// If kFramesSentinel ==> no active animation
-uint32_t animationEpoch;          // Time at which the animation started
-uint32_t animationClock;          // Time elapsed since animationEpoch
-uint32_t frameTransitionTime;     // Time after Epoch at which the a new frame is due
-uint32_t animationTransitionTime; // Time after Epoch at which the current animation should end
-bool skipToNextAnimation;         // true ==> discard the current animation now
-
-void AnimationUpdate() {
-  if (nextFrame != kFramesSentinel && (animationClock >= animationTransitionTime || skipToNextAnimation)) {
-    AnimationsDequeueAnimation();
-    nextFrame = kFramesSentinel;
-  }
-  skipToNextAnimation = false;
-  if (nextFrame == kFramesSentinel) {
-    if (liveAnimations != kAnimationsSentinel) {
-      nextFrame = animations[liveAnimations].frames;
-      animationEpoch = animationClock + animationEpoch;
-      frameTransitionTime = animationClock = 0;
-      animationTransitionTime = animations[liveAnimations].duration;
-    }
-  }
-  if (nextFrame != kFramesSentinel && animationClock >= frameTransitionTime) {
-    display.show(frames[nextFrame]);
-    frameTransitionTime = animationClock + frames[nextFrame].duration;
-    nextFrame = frames[nextFrame].next;
-    if (nextFrame == kFramesSentinel) {
-      nextFrame = animations[liveAnimations].frames;
-    }
-  }
-}
-
-void AnimationInit() {
-  nextFrame = kFramesSentinel;
-}
 
 /*
  * Protocol parser & dispatcher
@@ -589,11 +303,11 @@ void AnimationInit() {
  *    CLC <RGB>         white color correction point as 3 8-bit hex values
  *    DIM <0..255>      brightness value
  *    DTH ON|OFF        brightness dithering
- *    RGB <RGB STRING>  RGB values for one row (16x3 8-bit hex values) of a frame
- *    FRM <MILLIS>      start a frame to display for <MILLIS>ms
- *    ANM <MILLIS>      start an animation to display for <MILLIS>ms
- *    DON               wrap up and enqueue animation
- *    NXT               immediately terminate current animation and start the next
+ *    RGB <RGB STRING>  RGB values for one row (16x3 8-bit hex values) of a
+ * frame FRM <MILLIS>      start a frame to display for <MILLIS>ms ANM <MILLIS>
+ * start an animation to display for <MILLIS>ms DON               wrap up and
+ * enqueue animation NXT               immediately terminate current animation
+ * and start the next
  *
  * Example conversation:
  *   --> VER
@@ -627,25 +341,8 @@ char inputBuffer[BUFLEN];
 char *bufP;
 bool lineTooLong;
 
-AnimationIndex animationInProgress;
-FrameIndex frameInProgress;
-int frameInProgressLine;
-
-void CloseFrameConstruction() {
-  if (frameInProgress != kFramesSentinel) {
-    AnimationsAddFrame(animationInProgress, frameInProgress);
-    frameInProgress = kFramesSentinel;
-    frameInProgressLine = 0;
-  }
-}
-
-void CloseAnimationConstruction() {
-  if (animationInProgress != kAnimationsSentinel) {
-    CloseFrameConstruction();
-    AnimationsEnqueueAnimation(animationInProgress);
-    animationInProgress = kAnimationsSentinel;
-  }
-}
+blink::animation::Animator<32, 16, kLedMatrixNumCols, kLedMatrixNumLines>
+    animator(millis);
 
 namespace bt {
 BluetoothSerial serial;
@@ -653,83 +350,102 @@ bool pair_request_pending = false;
 bool active = false;
 bool setup_in_progress = false;
 
-FramePixels pair_pin_frame;
-const FramePixels bt_logo_frame = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
-  0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
-  0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0xFF, 0xFF, 0xFF, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0xFF, 0xFF, 0xFF,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD,
-  0x00, 0x83, 0xFD, 0x00, 0x83, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
+blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines> bt_logo_frame(
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF', '\xFF',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\xFF', '\xFF', '\xFF',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\xFF', '\xFF', '\xFF', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD', '\x00', '\x83', '\xFD',
+    '\x00', '\x83', '\xFD', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00',
+    '\x00', '\x00');
+
+blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines>
+    bt_pair_pin_frame;
 
 void _draw_pair_pin_frame(uint32_t pin) {
   // This is a font bitmask, 40x6, each digit is 4x6.
   static const uint64_t kFont[6] = {
-    0x6666277f66LLU,
-    0x9211688199LLU,
-    0xb216a68269LLU,
-    0x9221f1f297LLU,
-    0x9241219491LLU,
-    0x67fe2e747eLLU,
+      0x6666277f66LLU, 0x9211688199LLU, 0xb216a68269LLU,
+      0x9221f1f297LLU, 0x9241219491LLU, 0x67fe2e747eLLU,
   };
 
   // There are at least 4 digits in the pin and we draw the bottom 4.
@@ -738,20 +454,10 @@ void _draw_pair_pin_frame(uint32_t pin) {
   static const int digit_start_row[4] = {9, 9, 1, 1};
   static const int digit_start_col[4] = {10, 2, 10, 2};
   static const uint8_t digit_rgb[12] = {
-    0x42, 0x85, 0xF4,
-    0xDB, 0x44, 0x37,
-    0xF4, 0xB4, 0x00,
-    0x0F, 0x9D, 0x58,
+      0x42, 0x85, 0xF4, 0xDB, 0x44, 0x37, 0xF4, 0xB4, 0x00, 0x0F, 0x9D, 0x58,
   };
 
-  // Zero-out the whole image.
-  for (int r = 0; r < kLedMatrixNumLines; r++) {
-    for (int c = 0; c < kLedMatrixNumCols; c++) {
-      for (int rgb = 0; rgb < 3; rgb++) {
-        pair_pin_frame[(r * kLedMatrixNumCols + c) * 3 + rgb] = 0;
-      }
-    }
-  }
+  bt_pair_pin_frame.Clear();
 
   // Cut out digit by digit from the right and draw it.
   for (int digit_idx = 0; digit_idx < 4; digit_idx++) {
@@ -763,10 +469,9 @@ void _draw_pair_pin_frame(uint32_t pin) {
       for (int digit_col = 0; digit_col < 4; ++digit_col) {
         int col = digit_start_col[digit_idx] + digit_col;
         if (mask & kFont[digit_row]) {
-          for (int rgb = 0; rgb < 3; rgb++) {
-            pair_pin_frame[(row * kLedMatrixNumCols + col) * 3 + rgb] =
-                digit_rgb[digit_idx * 3 + rgb];
-          }
+          bt_pair_pin_frame.SetPixel(row, col, digit_rgb[digit_idx * 3],
+                                     digit_rgb[digit_idx * 3 + 1],
+                                     digit_rgb[digit_idx * 3 + 2]);
         }
         mask >>= 1;
       }
@@ -796,13 +501,11 @@ void Setup() {
   setup_in_progress = true;
 }
 
-void PairAccept() {
-  serial.confirmReply(true);
-}
+void PairAccept() { serial.confirmReply(true); }
 }  // namespace bt
 
 // Stream picking function. If bluetooth is active, it takes precedence.
-inline Stream& Comm() {
+inline Stream &Comm() {
   if (bt::active) {
     return bt::serial;
   }
@@ -826,7 +529,9 @@ void ReportPower(UsbCurrentAvailable pwr) {
 }
 
 void ProcessCommand() {
-  int l = bufP-inputBuffer;
+  static blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines>
+      *frame_being_loaded = nullptr;
+  int l = bufP - inputBuffer;
   if (lineTooLong) {
     Comm().println(F("NAK LIN"));
     return;
@@ -834,7 +539,8 @@ void ProcessCommand() {
   if (l > 4) {
     if (!strncmp((const char *)F("CLC "), inputBuffer, 4)) {
       CRGB c;
-      if (!ParseHex((uint8_t *)&c, inputBuffer+4, bufP)) {
+      if (!blink::util::ParseHex(reinterpret_cast<uint8_t *>(&c),
+                                 inputBuffer + 4, bufP)) {
         Comm().println(F("NAK CLC ARG"));
         return;
       }
@@ -847,7 +553,7 @@ void ProcessCommand() {
     }
     if (!strncmp("DIM ", inputBuffer, 4)) {
       uint32_t b;
-      if (!ParseUInt32(&b, inputBuffer+4, bufP) || b > 255) {
+      if (!blink::util::ParseUInt32(&b, inputBuffer + 4, bufP) || b > 255) {
         Comm().println(F("NAK DIM ARG"));
         return;
       }
@@ -857,12 +563,12 @@ void ProcessCommand() {
       return;
     }
     if (!strncmp("DTH ", inputBuffer, 4)) {
-      if (l == 6 && !strncmp("ON", inputBuffer+4, 2)) {
+      if (l == 6 && !strncmp("ON", inputBuffer + 4, 2)) {
         FastLED.setDither(BINARY_DITHER);
         Comm().println(F("ACK DTH ON"));
         return;
       }
-      if (l == 7 && !strncmp("OFF", inputBuffer+4, 3)) {
+      if (l == 7 && !strncmp("OFF", inputBuffer + 4, 3)) {
         FastLED.setDither(DISABLE_DITHER);
         Comm().println(F("ACK DTH OFF"));
         return;
@@ -871,65 +577,66 @@ void ProcessCommand() {
       return;
     }
     if (!strncmp("RGB ", inputBuffer, 4)) {
-      if (frameInProgress == kFramesSentinel) {
+      if (frame_being_loaded == nullptr) {
         Comm().println(F("NAK RGB NFM"));
         return;
       }
-      if (frameInProgressLine >= kLedMatrixNumLines) {
+      if (frame_being_loaded->IsDone()) {
         Comm().println(F("NAK RGB OFL"));
+        frame_being_loaded = nullptr;
         return;
       }
-      if (l != BUFLEN || !ParseHex(&(frames[frameInProgress].pixels[frameInProgressLine*3*kLedMatrixNumCols]), inputBuffer+4, bufP)) {
+
+      size_t row_being_loaded = frame_being_loaded->RowBeingLoaded();
+      if (l != BUFLEN || !frame_being_loaded->LoadPartFromAsciiHexBuffer(
+                             inputBuffer + 4, bufP)) {
         Comm().println(F("NAK RGB ARG"));
         return;
       }
       Comm().print(F("ACK RGB "));
-      Comm().println(frameInProgressLine);
-      frameInProgressLine++;
+      Comm().println(row_being_loaded);
+      if (frame_being_loaded->IsDone()) {
+        frame_being_loaded = nullptr;
+      }
       return;
     }
     if (!strncmp("FRM ", inputBuffer, 4)) {
-      Duration d;
-      if (!ParseUInt32(&d, inputBuffer+4, bufP)) {
+      uint32_t duration_milis;
+      if (!blink::util::ParseUInt32(&duration_milis, inputBuffer + 4, bufP)) {
         Comm().println(F("NAK FRM ARG"));
         return;
       }
-      CloseFrameConstruction();
-      frameInProgress = FramesGetFrame();
-      if (frameInProgress == kFramesSentinel) {
+      if (!animator.GetFrameToLoad(&frame_being_loaded)) {
         Comm().println(F("NAK FRM UFL"));
         return;
       }
-      frames[frameInProgress].duration = d;
+      frame_being_loaded->SetDuration(duration_milis);
       Comm().print(F("ACK FRM "));
-      Comm().println(d);
+      Comm().println(duration_milis);
       return;
     }
     if (!strncmp("ANM ", inputBuffer, 4)) {
-      Duration d;
-      if (!ParseUInt32(&d, inputBuffer+4, bufP)) {
+      uint32_t duration_milis;
+      if (!blink::util::ParseUInt32(&duration_milis, inputBuffer + 4, bufP)) {
         Comm().println(F("NAK ANM ARG"));
         return;
       }
-      CloseAnimationConstruction();
-      animationInProgress = AnimationsGetAnimation();
-      if (animationInProgress == kAnimationsSentinel) {
+      if (!animator.StartLoadingAnimation(duration_milis)) {
         Comm().println(F("NAK ANM UFL"));
         return;
       }
-      animations[animationInProgress].duration = d;
       Comm().print(F("ACK ANM "));
-      Comm().println(d);
+      Comm().println(duration_milis);
       return;
     }
     if (!strncmp("PWR ", inputBuffer, 4)) {
-      if (!strncmp("RST", inputBuffer+4, 3)) {
+      if (!strncmp("RST", inputBuffer + 4, 3)) {
         ResetPowerOverride();
-      } else if (!strncmp("3.0A", inputBuffer+4, 4)) {
+      } else if (!strncmp("3.0A", inputBuffer + 4, 4)) {
         SetPowerOverride(UsbCurrentAvailable::k3A);
-      } else if (!strncmp("1.5A", inputBuffer+4, 4)) {
+      } else if (!strncmp("1.5A", inputBuffer + 4, 4)) {
         SetPowerOverride(UsbCurrentAvailable::k1_5A);
-      } else if (!strncmp("0.5A", inputBuffer+4, 4)) {
+      } else if (!strncmp("0.5A", inputBuffer + 4, 4)) {
         SetPowerOverride(UsbCurrentAvailable::kUsbStd);
       } else {
         Comm().println(F("NAK PWR ARG"));
@@ -941,13 +648,13 @@ void ProcessCommand() {
     }
     if (l == 7 && !strncmp("ROT ", inputBuffer, 4)) {
       MatrixRotation rotation;
-      if (!strncmp("000", inputBuffer+4, 3)) {
+      if (!strncmp("000", inputBuffer + 4, 3)) {
         rotation = MatrixRotation::k000;
-      } else if (!strncmp("090", inputBuffer+4, 3)) {
+      } else if (!strncmp("090", inputBuffer + 4, 3)) {
         rotation = MatrixRotation::k090;
-      } else if (!strncmp("180", inputBuffer+4, 3)) {
+      } else if (!strncmp("180", inputBuffer + 4, 3)) {
         rotation = MatrixRotation::k180;
-      } else if (!strncmp("270", inputBuffer+4, 3)) {
+      } else if (!strncmp("270", inputBuffer + 4, 3)) {
         rotation = MatrixRotation::k270;
       } else {
         Comm().println(F("NAK ROT ARG"));
@@ -957,7 +664,7 @@ void ProcessCommand() {
       display.setRotation(rotation);
       inputBuffer[7] = '\0';
       Comm().print(F("ACK ROT "));
-      Comm().println(inputBuffer+4);
+      Comm().println(inputBuffer + 4);
       return;
     }
   }
@@ -972,79 +679,40 @@ void ProcessCommand() {
       return;
     }
     if (!strncmp("QUE", inputBuffer, 3)) {
-      AnimationIndex a = liveAnimations;
-      Comm().print(F("ACK QUE"));
-      if (a != kAnimationsSentinel) {
-        Comm().print(F(" ("));
-        Comm().print(animations[a].duration-animationClock);
-        Comm().print(F(", "));
-        Comm().print(FramesCountFrames(animations[a].frames));
-        Comm().print(F(")"));
-        a = animations[a].next;
-      }
-      while (a != kAnimationsSentinel) {
-        Comm().print(F(" ("));
-        Comm().print(animations[a].duration);
-        Comm().print(F(", "));
-        Comm().print(FramesCountFrames(animations[a].frames));
-        Comm().print(F(")"));
-        a = animations[a].next;
-      }
-      Comm().println();
+      Comm().println(F("ACK QUE NOP"));
       return;
     }
     if (!strncmp("FRE", inputBuffer, 3)) {
       Comm().print(F("ACK FRE "));
-      Comm().print(numFreeAnimations);
+      Comm().print(animator.GetNumFreeAnimationSlots());
       Comm().print(F(" "));
-      Comm().println(numFreeFrames);
+      Comm().println(animator.GetNumFreeFrameSlots());
+      Comm().println();
       return;
     }
     if (!strncmp("DON", inputBuffer, 3)) {
-      if (animationInProgress == kAnimationsSentinel) {
+      if (!animator.IsLoadingAnimation()) {
         Comm().println(F("NAK DON NOA"));
         return;
       }
-      CloseAnimationConstruction();
+      animator.FinalizeLoadingAnimation();
       Comm().println(F("ACK DON ANM"));
       return;
     }
     if (!strncmp("RST", inputBuffer, 3)) {
-      CloseAnimationConstruction();
-      while (liveAnimations != kAnimationsSentinel) {
-        AnimationsDequeueAnimation();
-      }
-      AnimationInit();
+      animator.Reset();
+      frame_being_loaded = nullptr;
       display.clear();
       Comm().println(F("ACK RST"));
       return;
     }
     if (!strncmp("NXT", inputBuffer, 3)) {
-      if (numLiveAnimations > 1) {
-        skipToNextAnimation = true;
-      }
+      animator.SkipCurrentAnimation();
       Comm().println(F("ACK NXT"));
       return;
     }
     if (!strncmp("DBG", inputBuffer, 3)) {
-      Comm().print(F("animationInProgress: ")); Comm().println(animationInProgress);
-      Comm().print(F("frameInProgress: ")); Comm().println(frameInProgress);
-      Comm().print(F("frameInProgressLine: ")); Comm().println(frameInProgressLine);
-      Comm().print(F("freeAnimations:"));
-      for (AnimationIndex a = freeAnimations; a != kAnimationsSentinel; a = animations[a].next) {
-        Comm().print(F(" ")); Comm().print(a);
-      }
-      Comm().println();
-      Comm().print(F("liveAnimations:"));
-      for (AnimationIndex a = liveAnimations; a != kAnimationsSentinel; a = animations[a].next) {
-        Comm().print(F(" ")); Comm().print(a);
-      }
-      Comm().println();
-      Comm().print(F("freeFrames:"));
-      for (FrameIndex f = freeFrames; f != kFramesSentinel; f = frames[f].next) {
-        Comm().print(F(" ")); Comm().print(f);
-      }
-      Comm().println();
+      animator.DebugDumpln(Comm());
       return;
     }
   }
@@ -1053,13 +721,11 @@ void ProcessCommand() {
 
 void SerialInit() {
   Serial.begin(BaudRate);
-  Serial.setRxBufferSize(SerialRxBufferSize); // Enough to hold 30ms worth of serial data.
+  Serial.setRxBufferSize(
+      SerialRxBufferSize);  // Enough to hold 30ms worth of serial data.
   Serial.println(F("Startup!"));
   bufP = inputBuffer;
   lineTooLong = false;
-  animationInProgress = kAnimationsSentinel;
-  frameInProgress = kFramesSentinel;
-  frameInProgressLine = 0;
 }
 
 void CommsUpdate() {
@@ -1081,7 +747,7 @@ void CommsUpdate() {
 
 // Debouncing touch button controller.
 template <int kInputPin>
-    class TouchButtonControler {
+class TouchButtonControler {
  public:
   TouchButtonControler()
       : filtered_value_(static_cast<float>(touchRead(kInputPin))) {}
@@ -1091,9 +757,7 @@ template <int kInputPin>
     filtered_value_ += (1.0f - kFilterStrength) * touchRead(kInputPin);
   }
 
-  bool Pressed() const {
-    return filtered_value_ < kPressThreshold;
-  }
+  bool Pressed() const { return filtered_value_ < kPressThreshold; }
 
  private:
   static constexpr float kFilterStrength = 0.7f;
@@ -1117,11 +781,9 @@ void setup() {
   preferences.begin("Blinkenlights", false);
   GetPowerOverride();
   display.clear();
-  display.setRotation((MatrixRotation)preferences.getUInt(MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
-  FramesReset();
-  AnimationsReset();
+  display.setRotation((MatrixRotation)preferences.getUInt(
+      MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
   SerialInit();
-  AnimationInit();
 }
 
 void loop() {
@@ -1147,14 +809,13 @@ void loop() {
   if (btn_num_pressed < 3) {
     btn_not_all_pressed_time = loop_epoch;
   } else if (loop_epoch - btn_not_all_pressed_time > 3000 &&
-             !bt::setup_in_progress &&
-             !bt::active) {
+             !bt::setup_in_progress && !bt::active) {
     bt::Setup();
   }
 
   if (bt::setup_in_progress) {
     if (bt::pair_request_pending) {
-      display.show(bt::pair_pin_frame);
+      display.show(bt::bt_pair_pin_frame);
 
       if (btn_num_pressed == 1) {
         bt::PairAccept();
@@ -1163,24 +824,22 @@ void loop() {
       display.show(bt::bt_logo_frame);
     }
   } else {
-    animationClock = loop_epoch - animationEpoch;
-    AnimationUpdate();
+    display.show(animator.GetCurrentFrame());
     CommsUpdate();
   }
 
-  // USB-C spec says the host can change the advertised current limit at any time,
-  // and we have tSinkAdj(max) (60ms) to comply.
-  // When we detect a CC value change, we also have to wait tRpValueChange(min) (10ms)
-  // to make sure this is not a PD message (which cause, for our purposes, noise on the
-  // CC line).
-  // So we implement that by having the loop run at 30ms, and if we see a CC change,
-  // we sample again in 15ms to make sure the value is stable, satisfying both timing
-  // requirements.
-  // We also light up LED#1 for 5 seconds if the main loop overruns its time allotment.
-  // It's meant only for debugging, people will probably not be normally watching this,
-  // so it doesn't matter that the logic implies that the LED might *not* light up
-  // if the overflow is detected exactly at millis() == 0.
-  // We might want to consider logging such events as ASY messages in the future.
+  // USB-C spec says the host can change the advertised current limit at any
+  // time, and we have tSinkAdj(max) (60ms) to comply. When we detect a CC value
+  // change, we also have to wait tRpValueChange(min) (10ms) to make sure this
+  // is not a PD message (which cause, for our purposes, noise on the CC line).
+  // So we implement that by having the loop run at 30ms, and if we see a CC
+  // change, we sample again in 15ms to make sure the value is stable,
+  // satisfying both timing requirements. We also light up LED#1 for 5 seconds
+  // if the main loop overruns its time allotment. It's meant only for
+  // debugging, people will probably not be normally watching this, so it
+  // doesn't matter that the logic implies that the LED might *not* light up if
+  // the overflow is detected exactly at millis() == 0. We might want to
+  // consider logging such events as ASY messages in the future.
   uint32_t elapsed = millis() - loop_epoch;
   if (elapsed > next_loop) {
     loop_overflow_millis = millis();
