@@ -32,8 +32,6 @@
 namespace blink {
 namespace animation {
 
-class Animator;
-
 template <size_t kWidth, size_t kHeight>
 class Frame {
  public:

@@ -341,7 +341,7 @@ char inputBuffer[BUFLEN];
 char *bufP;
 bool lineTooLong;
 
-blink::animation::Animatior<32, 16, kLedMatrixNumCols, kLedMatrixNumLines>
+blink::animation::Animator<32, 16, kLedMatrixNumCols, kLedMatrixNumLines>
     animator(millis);
 
 namespace bt {

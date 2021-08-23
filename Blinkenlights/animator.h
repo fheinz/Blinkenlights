@@ -32,11 +32,11 @@ namespace animation {
 
 template <size_t kMaxAnimations, size_t kMaxFrames, size_t kWidth,
           size_t kHeight>
-class Animatior {
+class Animator {
  public:
   using NowFunc = std::function<unsigned long int()>;
 
-  explicit Animatior(NowFunc now)
+  explicit Animator(NowFunc now)
       : now_(now),
         frames_(),
         sentinel_frame_(),
