@@ -21,13 +21,10 @@ $ arduino-cli compile -b esp32:esp32:esp32 --output-dir=./ ./Blinkenlights.ino
 This should produce multiple files, out of which only `Blinkenlights.ino.bin` is
 relevant most of the time.
 
-> NOTE: On every firmware change, please copy the compiled binary to:
-> `Blinkenlights.ino.esp32.bin` 
-
 ## Uploading
 
 The board is represented as a serial device on your computer. On Linux, that's
-likely going to be `/dev/ttyUSB0` or `/dev/ttyUSB0` (probably the only one with
+likely going to be `/dev/ttyUSB0` or `/dev/ttyUSB1` (probably the only one with
 `USB` in the name).
 
 > NOTE: In order to upload the resulting binary to the board you'll need to be
@@ -38,11 +35,11 @@ likely going to be `/dev/ttyUSB0` or `/dev/ttyUSB0` (probably the only one with
 ### With `arduino-cli`
 
 ```
-$ arduino-cli upload -b esp32:esp32:esp32 -p /dev/ttyUSB0 -i Blinkenlights.ino.esp32.bin --verify
+$ arduino-cli upload -b esp32:esp32:esp32 -p /dev/ttyUSB0 -i Blinkenlights.ino.bin --verify
 ```
 
 ### With `esptool`
 
 ```
-$ esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 115200 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size detect 0x10000 Blinkenlights.ino.esp32.bin
+$ esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 115200 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size detect 0x10000 Blinkenlights.ino.bin
 ```
