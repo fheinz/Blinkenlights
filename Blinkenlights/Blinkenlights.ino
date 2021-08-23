@@ -75,9 +75,6 @@ enum class UsbCurrentAvailable {
 constexpr int kLedMatrixNumCols = 16;
 constexpr int kLedMatrixNumLines = 16;
 constexpr int kLedMatrixNumLeds = kLedMatrixNumCols * kLedMatrixNumLines;
-constexpr float kMatrixMaxCurrent =
-    kLedMatrixNumLeds * 0.06f;           // WS2812B: 60mA/LED
-constexpr float kMaxIdleCurrent = 0.5f;  // Matrix + ESP32 idle
 
 /*
  * Called on violation of invariants. May be used for desperate
@@ -183,13 +180,11 @@ uint32_t PowerUpdate() {
     // because those take 10ms max.
     switch (current_advertisement) {
       case UsbCurrentAvailable::k3A:
-        FastLED.setBrightness(255 * (3.0f - kMaxIdleCurrent) /
-                              kMatrixMaxCurrent);
+        FastLED.setMaxPowerInVoltsAndMilliamps(5, 3000);
         EnableLEDPower();
         break;
       case UsbCurrentAvailable::k1_5A:
-        FastLED.setBrightness(255 * (1.5f - kMaxIdleCurrent) /
-                              kMatrixMaxCurrent);
+        FastLED.setMaxPowerInVoltsAndMilliamps(5, 1500);
         EnableLEDPower();
         break;
       default:
