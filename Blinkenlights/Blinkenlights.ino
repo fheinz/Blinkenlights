@@ -466,6 +466,24 @@ void ReportPower(UsbCurrentAvailable pwr) {
   }
 }
 
+
+/*
+ * Color Correction preference management.
+ */
+constexpr char ColorCorrectionPrefsKey[] = "ColorCorrection";
+void SetColorCorrectionPref(CRGB cc) {
+  preferences.putUInt(ColorCorrectionPrefsKey, (cc.red<<16)|(cc.green<<8)|cc.blue);
+}
+
+CRGB GetColorCorrectionPref() {
+  return CRGB(preferences.getUInt(ColorCorrectionPrefsKey, LEDColorCorrection::Typical8mmPixel));
+}
+
+void ResetColorCorrectionPref() {
+  preferences.remove(ColorCorrectionPrefsKey);
+}
+
+
 /*
  * Protocol parser & dispatcher
  *
@@ -523,8 +541,6 @@ char inputBuffer[BUFLEN];
 char *bufP;
 bool lineTooLong;
 
-constexpr char ColorCorrectionPrefsKey[] = "ColorCorrection";
-
 void ProcessCommand() {
   static blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines>
       *frame_being_loaded = nullptr;
@@ -534,20 +550,25 @@ void ProcessCommand() {
     return;
   }
   if (l > 4) {
-    if (!strncmp((const char *)F("CLC "), inputBuffer, 4)) {
-      CRGB c;
-      if (!blink::util::ParseHex(reinterpret_cast<uint8_t *>(&c),
-                                 inputBuffer + 4, bufP)) {
-        Comm().println(F("NAK CLC ARG"));
+    if (!strncmp("CLC ", inputBuffer, 4)) {
+      if (l == 7 && !strncmp("RST", inputBuffer+4, 3)) {
+        Comm().println(F("ACK CLC RST"));
+        ResetColorCorrectionPref();
+        FastLED.setCorrection(GetColorCorrectionPref());
+      } else {
+        CRGB c;
+        if (!blink::util::ParseHex(c.raw, inputBuffer + 4, bufP)) {
+          Comm().println(F("NAK CLC ARG"));
+          return;
+        }
+        SetColorCorrectionPref(c);
+        FastLED.setCorrection(c);
+        Comm().print(F("ACK CLC "));
+        Comm().print(c.red, HEX);
+        Comm().print(c.green, HEX);
+        Comm().println(c.blue, HEX);
         return;
       }
-      preferences.putUInt(ColorCorrectionPrefsKey, (c.red<<16)|(c.green<<8)|c.blue);
-      FastLED.setCorrection(c);
-      Comm().print(F("ACK CLC "));
-      Comm().print(c.red, HEX);
-      Comm().print(c.green, HEX);
-      Comm().println(c.blue, HEX);
-      return;
     }
     if (!strncmp("DIM ", inputBuffer, 4)) {
       uint32_t b;
@@ -778,7 +799,7 @@ void setup() {
   pinMode(kTouch2Pin, INPUT);
   preferences.begin("Blinkenlights", false);
   GetPowerOverride();
-  FastLED.setCorrection(CRGB(preferences.getUInt(ColorCorrectionPrefsKey, LEDColorCorrection::Typical8mmPixel)));
+  FastLED.setCorrection(GetColorCorrectionPref());
   display.clear();
   display.setRotation((MatrixRotation)preferences.getUInt(
       MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
