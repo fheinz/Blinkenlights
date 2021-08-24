@@ -567,8 +567,8 @@ void ProcessCommand() {
         Comm().print(c.red, HEX);
         Comm().print(c.green, HEX);
         Comm().println(c.blue, HEX);
-        return;
       }
+      return;
     }
     if (!strncmp("DIM ", inputBuffer, 4)) {
       uint32_t b;
