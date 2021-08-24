@@ -1,4 +1,4 @@
-# Binkenlights
+# Blinkenlights
 
 A LED display for pixel art animations.
 
