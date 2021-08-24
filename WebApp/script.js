@@ -36,19 +36,12 @@ const COLS = 16;
 const ROWS = COLS;
 
 const log = document.getElementById('log');
-const ledCBs = document.querySelectorAll('input.led');
-const divLeftBut = document.getElementById('leftBut');
-const divRightBut = document.getElementById('rightBut');
 const butConnect = document.getElementById('butConnect');
+const butSend = document.getElementById('butSend');
+const commandTextInput = document.getElementById('commandTxt');
 const pixelArtContainer = document.getElementById('pixelArtContainer');
 const gammaSlider = document.getElementById('gammaSlider');
 const gammaDisplay = document.getElementById('gammaDisplay');
-const redCCSlider = document.getElementById('redCCSlider');
-const redCCDisplay = document.getElementById('redCCDisplay');
-const blueCCSlider = document.getElementById('blueCCSlider');
-const blueCCDisplay = document.getElementById('blueCCDisplay');
-const greenCCSlider = document.getElementById('greenCCSlider');
-const greenCCDisplay = document.getElementById('greenCCDisplay');
 const debugButton = document.getElementById('debugButton');
 const clockButton = document.getElementById('clockButton');
 const gifDropzone = document.getElementById('gif-dropzone');
@@ -96,10 +89,10 @@ Dropzone.options.gifDropzone = {
 
 document.addEventListener('DOMContentLoaded', () => {
     butConnect.addEventListener('click', clickConnect);
+    butSend.addEventListener('click', clickSend);
 
     const notSupported = document.getElementById('notSupported');
     notSupported.classList.toggle('hidden', 'serial' in navigator);
-    initCheckboxes();
     document.querySelectorAll('img.pixelArt').forEach(initPixelArtImage);
     initGamma();
     debugButton.onclick = function() { if (port) writeToStream('DBG'); };
@@ -138,7 +131,6 @@ async function connect() {
     outputDone = encoder.readable.pipeTo(port.writable);
     outputStream = encoder.writable;
     writeToStream('', 'RST', 'VER', 'PWR');
-    updateColorCorrection();
 
     let decoder = new TextDecoderStream();
     inputDone = port.readable.pipeTo(decoder.writable);
@@ -185,8 +177,16 @@ async function clickConnect() {
     toggleUIConnected(true);
     if (currentImage)
 	sendGifAnimation(currentImage);
-    else
-	sendGrid();
+}
+
+
+/**
+ * @name clickSend
+ * Opens Send a command to the board
+ */
+async function clickSend() {
+    if (!port) return;
+    writeToStream(commandTextInput.value);
 }
 
 
@@ -238,36 +238,6 @@ function sendAnimation(anim) {
     });
     writeToStream('DON', 'NXT');
 }
-
-
-/**
- * @name sendGrid
- * Iterator of iterators over the checkbox grid to create an animation frame.
- */
-function* gridIterator() {
-    for (var r = 0; r < ROWS; r++) {
-	var start = r * COLS;
-	var end = start + COLS;
-	yield (function* () {
-	    for (var i = start; i < end; i++) {
-		yield ledCBs[i].checked ? [0xff, 0xff, 0xff] : [0x00, 0x00, 0x00];
-	    }
-	})();
-    }
-}
-
-
-
-/**
- * @name sendGrid
- * Display the grid state on the board
- */
-function sendGrid() {
-    var animation = new  Animation(600000);
-    animation.addFrame(new Frame(1000, gridIterator()));
-    sendAnimation(animation);
-}
-
 
 
 /**
@@ -346,14 +316,6 @@ class LineBreakTransformer {
     }
 }
 
-function initCheckboxes() {
-    ledCBs.forEach((cb) => {
-	cb.addEventListener('change', () => {
-	    if (port) sendGrid();
-	    currentImage = null;
-	});
-    });
-}
 
 function initPixelArtImage(img) {
     img.crossOrigin = "Anonymous";
@@ -380,44 +342,13 @@ function updateGamma() {
     }
 }
 
-function updateColorCorrection() {
-    writeToStream(
-	'CLC ' + paddedHex(Math.round(2.55*redCCSlider.value), 2) +
-	    paddedHex(Math.round(2.55*greenCCSlider.value), 2) +
-	    paddedHex(Math.round(2.55*blueCCSlider.value), 2)
-    );
-}
-
 function initGamma() {
     gammaSlider.oninput = function () {
 	updateSliderDisplay(gammaSlider, gammaDisplay);
     };
     gammaSlider.oninput();
-    redCCSlider.oninput = function () {
-	updateSliderDisplay(redCCSlider, redCCDisplay);
-    };
-    redCCSlider.oninput();
-    greenCCSlider.oninput = function () {
-	updateSliderDisplay(greenCCSlider, greenCCDisplay);
-    };
-    greenCCSlider.oninput();
-    blueCCSlider.oninput = function () {
-	updateSliderDisplay(blueCCSlider, blueCCDisplay);
-    };
-    blueCCSlider.oninput();
     gammaSlider.onchange = updateGamma;
-    redCCSlider.onchange = updateColorCorrection;
-    greenCCSlider.onchange = updateColorCorrection;
-    blueCCSlider.onchange = updateColorCorrection;
     updateGamma();
-}
-
-function drawGrid(grid) {
-    if (grid) {
-	grid.forEach((v, i) => {
-	    ledCBs[i].checked = !!v;
-	});
-    }
 }
 
 function toggleUIConnected(connected) {
@@ -426,13 +357,6 @@ function toggleUIConnected(connected) {
 	lbl = 'Disconnect';
     }
     butConnect.textContent = lbl;
-    ledCBs.forEach((cb) => {
-	if (connected) {
-	    cb.removeAttribute('disabled');
-	    return;
-	}
-	cb.setAttribute('disabled', true);
-    });
 }
 
 const DIGIT_ROWS = 5;
