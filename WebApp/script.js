@@ -35,6 +35,10 @@ let currentImage;
 const COLS = 16;
 const ROWS = COLS;
 
+const MIN_GAMMA = 0.5;
+const MAX_GAMMA = 3.0;
+const DEFAULT_GAMMA = 2.0;
+
 const log = document.getElementById('log');
 const butConnect = document.getElementById('butConnect');
 const butSend = document.getElementById('butSend');
@@ -94,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const notSupported = document.getElementById('notSupported');
     notSupported.classList.toggle('hidden', 'serial' in navigator);
     document.querySelectorAll('img.pixelArt').forEach(initPixelArtImage);
-    initGamma();
+    initGamma(DEFAULT_GAMMA);
     debugButton.onclick = function() { if (port) writeToStream('DBG'); };
     clockButton.onclick = function() { drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]); };
 });
@@ -325,24 +329,29 @@ function initPixelArtImage(img) {
     }
 }
 
-function updateGammaDisplay() {
-    gammaDisplay.innerHTML = gammaSlider.value/100.0;
+function gammaValueFromSlider(v) {
+    return MIN_GAMMA + v*(MAX_GAMMA-MIN_GAMMA)/100.0;
+}
+
+function sliderValueFromGamma(g) {
+    return (g-MIN_GAMMA)*100.0/(MAX_GAMMA-MIN_GAMMA);
 }
 
 function updateSliderDisplay(slider, display) {
-    display.innerHTML = slider.value/100.0;
+    gammaDisplay.innerHTML = gammaValueFromSlider(gammaSlider.value).toFixed(2);
 }
 
 function updateGamma() {
-    var invGamma = 100.0/gammaSlider.value;
+    var gamma = gammaValueFromSlider(gammaSlider.value);
     let i = 0;
-    gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**invGamma)));
+    gammaTable = Array.from(Array(256), () => Math.round(255*((i++/255.0)**gamma)));
     if (currentImage) {
 	sendGifAnimation(currentImage);
     }
 }
 
-function initGamma() {
+function initGamma(g) {
+    gammaSlider.value = sliderValueFromGamma(g);
     gammaSlider.oninput = function () {
 	updateSliderDisplay(gammaSlider, gammaDisplay);
     };

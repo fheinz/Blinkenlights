@@ -11992,6 +11992,9 @@ var gammaTable;
 var currentImage;
 var COLS = 16;
 var ROWS = COLS;
+var MIN_GAMMA = 0.5;
+var MAX_GAMMA = 3.0;
+var DEFAULT_GAMMA = 2.0;
 var log = document.getElementById('log');
 var butConnect = document.getElementById('butConnect');
 var butSend = document.getElementById('butSend');
@@ -12056,7 +12059,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var notSupported = document.getElementById('notSupported');
   notSupported.classList.toggle('hidden', 'serial' in navigator);
   document.querySelectorAll('img.pixelArt').forEach(initPixelArtImage);
-  initGamma();
+  initGamma(DEFAULT_GAMMA);
 
   debugButton.onclick = function () {
     if (port) writeToStream('DBG');
@@ -12512,19 +12515,23 @@ function initPixelArtImage(img) {
   };
 }
 
-function updateGammaDisplay() {
-  gammaDisplay.innerHTML = gammaSlider.value / 100.0;
+function gammaValueFromSlider(v) {
+  return MIN_GAMMA + v * (MAX_GAMMA - MIN_GAMMA) / 100.0;
+}
+
+function sliderValueFromGamma(g) {
+  return (g - MIN_GAMMA) * 100.0 / (MAX_GAMMA - MIN_GAMMA);
 }
 
 function updateSliderDisplay(slider, display) {
-  display.innerHTML = slider.value / 100.0;
+  gammaDisplay.innerHTML = gammaValueFromSlider(gammaSlider.value).toFixed(2);
 }
 
 function updateGamma() {
-  var invGamma = 100.0 / gammaSlider.value;
+  var gamma = gammaValueFromSlider(gammaSlider.value);
   var i = 0;
   gammaTable = Array.from(Array(256), function () {
-    return Math.round(255 * Math.pow(i++ / 255.0, invGamma));
+    return Math.round(255 * Math.pow(i++ / 255.0, gamma));
   });
 
   if (currentImage) {
@@ -12532,7 +12539,9 @@ function updateGamma() {
   }
 }
 
-function initGamma() {
+function initGamma(g) {
+  gammaSlider.value = sliderValueFromGamma(g);
+
   gammaSlider.oninput = function () {
     updateSliderDisplay(gammaSlider, gammaDisplay);
   };
