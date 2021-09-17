@@ -12005,10 +12005,6 @@ var gammaDisplay = document.getElementById('gammaDisplay');
 var debugButton = document.getElementById('debugButton');
 var clockButton = document.getElementById('clockButton');
 var gifDropzone = document.getElementById('gif-dropzone');
-var usbFilter = [{
-  usbVendorId: 0x1a86,
-  usbProductId: 0x7523
-}];
 _dropzone.Dropzone.options.gifDropzone = {
   autoProcessQueue: false,
   autoQueue: false,
@@ -12118,9 +12114,7 @@ function _connect() {
 
           case 8:
             _context5.next = 10;
-            return navigator.serial.requestPort({
-              filters: usbFilter
-            });
+            return navigator.serial.requestPort();
 
           case 10:
             port = _context5.sent;

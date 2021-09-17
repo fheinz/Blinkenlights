@@ -50,10 +50,6 @@ const debugButton = document.getElementById('debugButton');
 const clockButton = document.getElementById('clockButton');
 const gifDropzone = document.getElementById('gif-dropzone');
 
-const usbFilter = [
-    {usbVendorId: 0x1a86, usbProductId: 0x7523}
-];
-
 Dropzone.options.gifDropzone = {
     autoProcessQueue: false,
     autoQueue: false,
@@ -124,7 +120,7 @@ async function connect() {
 	if (ports.length == 1) {
 	    port = ports[0];
 	} else {
-	    port = await navigator.serial.requestPort({ filters: usbFilter });
+	    port = await navigator.serial.requestPort();
 	}
 	await port.open({ baudRate: 115200 });
     } catch (e) {
