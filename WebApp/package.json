@@ -5,10 +5,14 @@
     "main": "script.js",
     "dependencies": {
         "@babel/preset-env": "^7.14.4",
+        "@babel/runtime": "^7.16.0",
+        "@joeattardi/emoji-button": "^4.6.0",
         "browserify": "^17.0.0",
         "browserify-css": "^0.15.0",
         "dropzone": "^5.9.2",
+        "express": "^4.17.1",
         "gifuct-js": "^2.1.1",
+        "socket.io": "^4.2.0",
         "watchify": "^4.0.0"
     },
     "devDependencies": {
@@ -28,8 +32,9 @@
         ]
     },
     "scripts": {
-        "build": "browserify -t browserify-css script.js -o bundle.js; ",
-        "watch": "watchify script.js -o bundle.js -v",
+        "build": "browserify -t browserify-css public/script.js public/blinken.js -o public/bundle.js; ",
+        "build-blinkmoji": "browserify public/blinkmoji.js public/blinken.js -o public/bundle-blinkmoji.js ",
+        "watch": "watchify public/script.js -o public/bundle.js -v",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "repository": {
