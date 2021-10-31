@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Socket.IO chat</title>
+    <link rel="stylesheet" type="text/css" href="/css/blinkmoji.css" />
+  </head>
+  <body>
+    <div class="center-screen">
+      <form action="blinkmoji/room">
+        <div class="form-control">
+          <label for="username" class="text">Username</label>
+          <input
+            type="text"
+            name="username"
+            id="username"
+            placeholder="Enter username..."
+            required
+          />
+        </div>
+        <div class="form-control">
+          <label for="room" class="text">Room</label>
+          <input
+            type="text"
+            name="room"
+            id="room"
+            placeholder="Enter room name..."
+            required
+          />
+        </div>
+        <button type="submit" class="button buttonLarge textButton">
+          Join Chat
+        </button>
+      </form>
+    </div>
+  </body>
+</html>

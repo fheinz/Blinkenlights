@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Socket.IO chat</title>
+    <link rel="stylesheet" type="text/css" href="/css/blinkmoji.css" />
+  </head>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <body>
+    <script src="/bundle-blinkmoji.js" defer></script>
+    <div class="top-left">
+      <h2 id="roomTitle" class="text">Users in room</h2>
+      <ul id="usersList"></ul>
+    </div>
+    <div id="boardControlContainer"></div>
+    <div class="pixelArtContainer" id="pixelArtContainer"></div>
+    <div>
+      <ul id="messages"></ul>
+    </div>
+    <div class="center-screen">
+      <button
+        id="buttonConnect"
+        type="button"
+        class="button textButton buttonMedium"
+      >
+        Connect
+      </button>
+      <button id="emoji-trigger" class="button">😎</button>
+      <button
+        id="buttonClear"
+        type="button"
+        class="button textButton buttonMedium"
+      >
+        Clear
+      </button>
+      <!-- <input -->
+      <!--   type="range" -->
+      <!--   min="0" -->
+      <!--   max="100" -->
+      <!--   value="70" -->
+      <!--   class="slider" -->
+      <!--   id="gammaSlider" -->
+      <!-- /> -->
+      <!-- <div id="gammaDisplay" style="display: none"></div> -->
+    </div>
+  </body>
+</html>
