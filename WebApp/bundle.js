@@ -11958,10 +11958,6 @@ var _marked = /*#__PURE__*/regeneratorRuntime.mark(fillRowIterator),
     _marked3 = /*#__PURE__*/regeneratorRuntime.mark(digitRowIterator),
     _marked4 = /*#__PURE__*/regeneratorRuntime.mark(digitalClockIterator);
 
-function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
-
-function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
-
 function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
 
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
@@ -11974,27 +11970,27 @@ function _iterableToArrayLimit(arr, i) { var _i = arr && (typeof Symbol !== "und
 
 function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
 
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { Promise.resolve(value).then(_next, _throw); } }
 
 function _asyncToGenerator(fn) { return function () { var self = this, args = arguments; return new Promise(function (resolve, reject) { var gen = fn.apply(self, args); function _next(value) { asyncGeneratorStep(gen, resolve, reject, _next, _throw, "next", value); } function _throw(err) { asyncGeneratorStep(gen, resolve, reject, _next, _throw, "throw", err); } _next(undefined); }); }; }
 
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
+
+function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
+
 var css = require("./style.css");
 
-var port;
-var reader;
-var inputDone;
-var outputDone;
-var inputStream;
-var outputStream;
 var gammaTable;
 var currentImage;
+var blinkenlights;
 var COLS = 16;
 var ROWS = COLS;
 var MIN_GAMMA = 0.5;
 var MAX_GAMMA = 3.0;
 var DEFAULT_GAMMA = 2.0;
+var protocolTimeout = 300;
 var log = document.getElementById('log');
 var butConnect = document.getElementById('butConnect');
 var butSend = document.getElementById('butSend');
@@ -12005,222 +12001,566 @@ var gammaDisplay = document.getElementById('gammaDisplay');
 var debugButton = document.getElementById('debugButton');
 var clockButton = document.getElementById('clockButton');
 var gifDropzone = document.getElementById('gif-dropzone');
-_dropzone.Dropzone.options.gifDropzone = {
-  autoProcessQueue: false,
-  autoQueue: false,
-  createImageThumbnails: false,
-  accept: function accept(file, done) {
-    var fr = new FileReader();
+/**
+ * @name LineBreakTransformer
+ * TransformStream to parse the stream into lines.
+ */
 
-    fr.onload = function () {
-      var img = document.createElement('img');
-      img.src = fr.result;
-      var oReq = new XMLHttpRequest();
-      oReq.open('GET', img.src, true);
-      oReq.responseType = 'arraybuffer';
+var LineBreakTransformer = /*#__PURE__*/function () {
+  function LineBreakTransformer() {
+    _classCallCheck(this, LineBreakTransformer);
 
-      oReq.onload = function (oEvent) {
-        var arrayBuffer = oReq.response;
-
-        if (arrayBuffer) {
-          var gif = (0, _gifuctJs.parseGIF)(arrayBuffer);
-
-          if (gif.lsd.width != ROWS || gif.lsd.height != COLS) {
-            console.log(file.name + ": only " + ROWS + "x" + COLS + " GIF supported");
-            return;
-          }
-
-          img.className = "pixelArt";
-          initPixelArtImage(img);
-          pixelArtContainer.appendChild(img);
-        }
-      };
-
-      oReq.send(null);
-    };
-
-    fr.readAsDataURL(file);
-
-    _dropzone.Dropzone.forElement('#gif-dropzone').removeFile(file);
-
-    done();
-  },
-  init: function init() {
-    console.log("Dropzone init!");
+    // A container for holding stream data until a new line.
+    this.container = '';
   }
-};
-document.addEventListener('DOMContentLoaded', function () {
-  butConnect.addEventListener('click', clickConnect);
-  butSend.addEventListener('click', clickSend);
-  var notSupported = document.getElementById('notSupported');
-  notSupported.classList.toggle('hidden', 'serial' in navigator);
-  document.querySelectorAll('img.pixelArt').forEach(initPixelArtImage);
-  initGamma(DEFAULT_GAMMA);
 
-  debugButton.onclick = function () {
-    if (port) writeToStream('DBG');
-  };
+  _createClass(LineBreakTransformer, [{
+    key: "transform",
+    value: function transform(chunk, controller) {
+      this.container += chunk;
+      var lines = this.container.split('\r\n');
+      this.container = lines.pop();
+      lines.forEach(function (line) {
+        return controller.enqueue(line);
+      });
+    }
+  }, {
+    key: "flush",
+    value: function flush(controller) {
+      controller.enqueue(this.container);
+    }
+  }]);
 
-  clockButton.onclick = function () {
-    drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]);
-  };
-});
+  return LineBreakTransformer;
+}();
 /**
  * @name paddedHex
  * Return the hex string representation of `number`, padded to `width` places.
  */
 
+
 function paddedHex(number, width) {
   return number.toString(16).padStart(width, '0').toUpperCase();
 }
-/**
- * @name connect
- * Opens a Web Serial connection to the board and sets up the input and
- * output stream.
- */
+
+var States = {
+  UNKNOWN: "unknown",
+  IDLE: "idle",
+  RESETTING: "resetting",
+  SYNC: "sync",
+  GET_VERSION: "get version",
+  WF_ACK: {
+    RGB: "waiting for RGB line ack"
+  }
+};
+var Events = {
+  ANY: "wildcard event",
+  TIMEOUT: "timeout",
+  ACK: {
+    FRM: "frame ack",
+    RGB: "rgb ack",
+    VER: "version ack",
+    SYN: "synchronization ack",
+    RST: "reset ack"
+  },
+  NAK: {
+    SYN: "synchronization nack",
+    CMD: "command nack"
+  }
+};
+var Transitions = {};
+Transitions[States.UNKNOWN] = {};
+Transitions[States.IDLE] = {};
+Transitions[States.SYNC] = {};
+
+Transitions[States.SYNC][Events.ACK.SYN] = function (bl, ev) {
+  if (ev.line == bl.expected_line) {
+    bl.clearTimeout();
+    return States.IDLE;
+  }
+
+  return bl.state;
+};
+
+Transitions[States.SYNC][Events.TIMEOUT] = function (bl, ev) {
+  bl.synchronize();
+  return bl.state;
+};
+
+Transitions[States.SYNC][Events.NAK.SYN] = function (bl, ev) {
+  bl.synchronize();
+  return bl.state;
+};
+
+Transitions[States.SYNC][Events.NAK.CMD] = function (bl, ev) {
+  bl.synchronize();
+  return bl.state;
+};
+
+Transitions[States.GET_VERSION] = {};
+
+Transitions[States.GET_VERSION][Events.ACK.VER] = function (bl, ev) {
+  bl.clearTimeout();
+  bl.protocol_version = ev.line.substring(8);
+  return States.IDLE;
+};
+
+Transitions[States.RESETTING] = {};
+
+Transitions[States.RESETTING][Events.ACK.RST] = function (bl, ev) {
+  return States.IDLE;
+};
+
+Transitions[States.RESETTING][Events.TIMEOUT] = function (bl, ev) {
+  bl.reset();
+  ;
+  return bl.state;
+};
+
+Transitions[States.WF_ACK.RGB] = {};
+
+Transitions[States.WF_ACK.RGB][Events.ACK.RGB] = function (bl, ev) {
+  if (++bl.acked_lines < COLS) {
+    return bl.state;
+  }
+
+  return States.IDLE;
+};
+
+var Blinkenlights = /*#__PURE__*/function () {
+  function Blinkenlights() {
+    _classCallCheck(this, Blinkenlights);
+
+    this.port = null;
+    this.state = States.IDLE;
+    this.timeout = null;
+    this.job_queue = [];
+  }
+  /**
+   * @name isConnected
+   * Returns true of connection to the board is actuve.
+   */
 
 
-function connect() {
-  return _connect.apply(this, arguments);
-}
-/**
- * @name disconnect
- * Closes the Web Serial connection.
- */
+  _createClass(Blinkenlights, [{
+    key: "isConnected",
+    value: function isConnected() {
+      return this.port !== null;
+    }
+    /**
+     * @name connect
+     * Opens a Web Serial connection to the board and sets up the input and
+     * output stream.
+     */
 
+  }, {
+    key: "connect",
+    value: function () {
+      var _connect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
+        var ports, port, encoder, decoder, inputStream;
+        return regeneratorRuntime.wrap(function _callee$(_context) {
+          while (1) {
+            switch (_context.prev = _context.next) {
+              case 0:
+                if (!this.isConnected()) {
+                  _context.next = 2;
+                  break;
+                }
 
-function _connect() {
-  _connect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
-    var ports, encoder, decoder;
-    return regeneratorRuntime.wrap(function _callee$(_context5) {
-      while (1) {
-        switch (_context5.prev = _context5.next) {
-          case 0:
-            _context5.next = 2;
-            return navigator.serial.getPorts();
+                return _context.abrupt("return");
 
-          case 2:
-            ports = _context5.sent;
-            _context5.prev = 3;
+              case 2:
+                _context.next = 4;
+                return navigator.serial.getPorts();
 
-            if (!(ports.length == 1)) {
-              _context5.next = 8;
-              break;
+              case 4:
+                ports = _context.sent;
+                port = null;
+
+                if (!(ports.length == 1)) {
+                  _context.next = 10;
+                  break;
+                }
+
+                port = ports[0];
+                _context.next = 13;
+                break;
+
+              case 10:
+                _context.next = 12;
+                return navigator.serial.requestPort();
+
+              case 12:
+                port = _context.sent;
+
+              case 13:
+                _context.next = 15;
+                return port.open({
+                  baudRate: 115200
+                });
+
+              case 15:
+                this.port = port;
+                encoder = new TextEncoderStream();
+                this.outputDone = encoder.readable.pipeTo(port.writable);
+                this.outputStream = encoder.writable;
+                decoder = new TextDecoderStream();
+                this.inputDone = port.readable.pipeTo(decoder.writable);
+                inputStream = decoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer()));
+                this.reader = inputStream.getReader();
+
+              case 23:
+              case "end":
+                return _context.stop();
             }
+          }
+        }, _callee, this);
+      }));
 
-            port = ports[0];
-            _context5.next = 11;
-            break;
+      function connect() {
+        return _connect.apply(this, arguments);
+      }
 
-          case 8:
-            _context5.next = 10;
-            return navigator.serial.requestPort();
+      return connect;
+    }()
+    /**
+     * @name sendCommands
+     * Gets a writer from the output stream and send the lines to the micro:bit.
+     * @param  {...string} lines: lines to send to the board
+     */
 
-          case 10:
-            port = _context5.sent;
+  }, {
+    key: "sendCommands",
+    value: function sendCommands() {
+      if (!this.isConnected()) return;
+      var writer = this.outputStream.getWriter();
 
-          case 11:
-            _context5.next = 13;
-            return port.open({
-              baudRate: 115200
-            });
+      for (var _len = arguments.length, lines = new Array(_len), _key = 0; _key < _len; _key++) {
+        lines[_key] = arguments[_key];
+      }
 
-          case 13:
-            _context5.next = 18;
-            break;
+      lines.forEach(function (line) {
+        console.log('[SEND]', line);
+        writer.write(line + '\n');
+      });
+      writer.releaseLock();
+    }
+    /**
+     * @name getTransition
+     * Gets the transition function for the current State, Event combination.
+     * @param {string} first, second: primary and secondary event Protocol Unit ids
+     */
 
-          case 15:
-            _context5.prev = 15;
-            _context5.t0 = _context5["catch"](3);
-            return _context5.abrupt("return");
+  }, {
+    key: "getTransition",
+    value: function getTransition(first, second) {
+      var valid_transitions = Transitions[this.state];
 
-          case 18:
-            encoder = new TextEncoderStream();
-            outputDone = encoder.readable.pipeTo(port.writable);
-            outputStream = encoder.writable;
-            writeToStream('', 'RST', 'VER', 'PWR');
-            decoder = new TextDecoderStream();
-            inputDone = port.readable.pipeTo(decoder.writable);
-            inputStream = decoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer()));
-            reader = inputStream.getReader();
-            readLoop();
+      if (first in Events) {
+        if (Events[first].constructor === Object && second in Events[first] && Events[first][second] in valid_transitions) {
+          return valid_transitions[Events[first][second]];
+        }
 
-          case 27:
-          case "end":
-            return _context5.stop();
+        if (Events[first] in valid_transitions) {
+          return valid_transitions[Events[first]];
         }
       }
-    }, _callee, null, [[3, 15]]);
-  }));
-  return _connect.apply(this, arguments);
-}
 
-function disconnect() {
-  return _disconnect.apply(this, arguments);
-}
+      if (Events.ANY in valid_transitions) {
+        return valid_transitions[Events.ANY];
+      }
+
+      return null;
+    }
+    /**
+     * @name run
+     * Run the protocol state machine.
+     */
+
+  }, {
+    key: "run",
+    value: function () {
+      var _run = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
+        var _this, _yield$this$reader$re, value, done, transition;
+
+        return regeneratorRuntime.wrap(function _callee2$(_context2) {
+          while (1) {
+            switch (_context2.prev = _context2.next) {
+              case 0:
+                _this = this;
+
+                if (this.isConnected()) {
+                  _context2.next = 3;
+                  break;
+                }
+
+                return _context2.abrupt("return");
+
+              case 3:
+                this.addToQueue(function () {
+                  _this.getProtocolVersion();
+                });
+                this.addToQueue(function () {
+                  _this.reset();
+                });
+
+              case 5:
+                if (!true) {
+                  _context2.next = 18;
+                  break;
+                }
+
+                this.processQueue();
+                _context2.next = 9;
+                return this.reader.read();
+
+              case 9:
+                _yield$this$reader$re = _context2.sent;
+                value = _yield$this$reader$re.value;
+                done = _yield$this$reader$re.done;
+
+                if (value) {
+                  console.log('[RECV] ' + value + '\n');
+                  transition = this.getTransition(value.substring(0, 3), value.substring(4, 7));
+
+                  if (transition) {
+                    this.state = transition(this, {
+                      line: value
+                    });
+                  }
+                }
+
+                if (!done) {
+                  _context2.next = 16;
+                  break;
+                }
+
+                console.log('[readLoop] DONE', done);
+                return _context2.abrupt("break", 18);
+
+              case 16:
+                _context2.next = 5;
+                break;
+
+              case 18:
+              case "end":
+                return _context2.stop();
+            }
+          }
+        }, _callee2, this);
+      }));
+
+      function run() {
+        return _run.apply(this, arguments);
+      }
+
+      return run;
+    }()
+    /**
+     * @name clearTimeout
+     * Stop the timeout counter
+     */
+
+  }, {
+    key: "clearTimeout",
+    value: function clearTimeout() {
+      if (this.timeout) {
+        window.clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+    }
+    /**
+     * @name setTimeout
+     * Set a timeout for a response to a command to arrive
+     */
+
+  }, {
+    key: "setTimeout",
+    value: function setTimeout(ms) {
+      var _this = this;
+
+      this.timeout = window.setTimeout(function () {
+        _this.triggerTimeout();
+      }, ms);
+    }
+    /**
+     * @name triggerTimeout
+     * Trigger a timeout event in the state machine.
+     */
+
+  }, {
+    key: "triggerTimeout",
+    value: function triggerTimeout() {
+      this.clearTimeout();
+      var transition = this.getTransition(Events.TIMEOUT, null);
+
+      if (transition) {
+        this.state = transition(this, {});
+      }
+
+      ;
+    }
+    /**
+     * @name clearQueue
+     * Get rid of any remaining jobs in the queue
+     */
+
+  }, {
+    key: "clearQueue",
+    value: function clearQueue() {
+      this.job_queue = [];
+    }
+    /**
+     * @name addToQueue
+     * Add a job to the queue.
+     */
+
+  }, {
+    key: "addToQueue",
+    value: function addToQueue(job) {
+      this.job_queue.push(job);
+      this.processQueue();
+    }
+    /**
+     * @name processQueue
+     * Process items from the command queue
+     */
+
+  }, {
+    key: "processQueue",
+    value: function processQueue() {
+      while (this.state == States.IDLE && this.job_queue.length > 0) {
+        this.job_queue.shift()();
+      }
+    }
+    /**
+     * @name disconnect
+     * Closes the Web Serial connection.
+     */
+
+  }, {
+    key: "disconnect",
+    value: function () {
+      var _disconnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee3() {
+        return regeneratorRuntime.wrap(function _callee3$(_context3) {
+          while (1) {
+            switch (_context3.prev = _context3.next) {
+              case 0:
+                if (!this.reader) {
+                  _context3.next = 8;
+                  break;
+                }
+
+                this.reader.releaseLock();
+                _context3.next = 4;
+                return this.reader.cancel();
+
+              case 4:
+                _context3.next = 6;
+                return this.inputDone["catch"](function () {});
+
+              case 6:
+                this.reader = null;
+                this.inputDone = null;
+
+              case 8:
+                if (!this.outputStream) {
+                  _context3.next = 15;
+                  break;
+                }
+
+                _context3.next = 11;
+                return this.outputStream.getWriter().close();
+
+              case 11:
+                _context3.next = 13;
+                return this.outputDone;
+
+              case 13:
+                this.outputStream = null;
+                this.outputDone = null;
+
+              case 15:
+                _context3.next = 17;
+                return this.port.close();
+
+              case 17:
+                this.port = null;
+
+              case 18:
+              case "end":
+                return _context3.stop();
+            }
+          }
+        }, _callee3, this);
+      }));
+
+      function disconnect() {
+        return _disconnect.apply(this, arguments);
+      }
+
+      return disconnect;
+    }()
+    /**
+     * @name reset
+     * Reset the job queue and get the board to the startup state
+     */
+
+  }, {
+    key: "reset",
+    value: function reset() {
+      this.clearQueue();
+      this.sendCommands('RST');
+      this.state = States.RESETTING;
+    }
+    /**
+     * @name getProtocolVersion
+     * Query the protocol version from the board
+     */
+
+  }, {
+    key: "getProtocolVersion",
+    value: function getProtocolVersion() {
+      this.sendCommands('VER');
+      this.setTimeout(protocolTimeout);
+      this.state = States.GET_VERSION;
+    }
+    /**
+     * @name sendAnimation
+     * Send an animation to the board
+     */
+
+  }, {
+    key: "sendAnimation",
+    value: function sendAnimation(anim) {
+      var _this = this;
+
+      this.addToQueue(function () {
+        _this.sendCommands('ANM ' + anim.duration);
+      });
+      anim.frames.forEach(function (frame) {
+        _this.addToQueue(function () {
+          _this.sendCommands('FRM ' + frame.duration);
+
+          frame.rows.forEach(function (row) {
+            return _this.sendCommands('RGB ' + row);
+          });
+          _this.state = States.WF_ACK.RGB;
+        });
+      });
+      this.addToQueue(function () {
+        _this.sendCommands('DON', 'NXT');
+      });
+    }
+  }]);
+
+  return Blinkenlights;
+}();
 /**
  * @name clickConnect
  * Click handler for the connect/disconnect button.
  */
 
-
-function _disconnect() {
-  _disconnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
-    return regeneratorRuntime.wrap(function _callee2$(_context6) {
-      while (1) {
-        switch (_context6.prev = _context6.next) {
-          case 0:
-            writeToStream('RST');
-
-            if (!reader) {
-              _context6.next = 8;
-              break;
-            }
-
-            _context6.next = 4;
-            return reader.cancel();
-
-          case 4:
-            _context6.next = 6;
-            return inputDone["catch"](function () {});
-
-          case 6:
-            reader = null;
-            inputDone = null;
-
-          case 8:
-            if (!outputStream) {
-              _context6.next = 15;
-              break;
-            }
-
-            _context6.next = 11;
-            return outputStream.getWriter().close();
-
-          case 11:
-            _context6.next = 13;
-            return outputDone;
-
-          case 13:
-            outputStream = null;
-            outputDone = null;
-
-          case 15:
-            _context6.next = 17;
-            return port.close();
-
-          case 17:
-            port = null;
-
-          case 18:
-          case "end":
-            return _context6.stop();
-        }
-      }
-    }, _callee2);
-  }));
-  return _disconnect.apply(this, arguments);
-}
 
 function clickConnect() {
   return _clickConnect.apply(this, arguments);
@@ -12232,37 +12572,35 @@ function clickConnect() {
 
 
 function _clickConnect() {
-  _clickConnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee3() {
-    return regeneratorRuntime.wrap(function _callee3$(_context7) {
+  _clickConnect = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee4() {
+    return regeneratorRuntime.wrap(function _callee4$(_context8) {
       while (1) {
-        switch (_context7.prev = _context7.next) {
+        switch (_context8.prev = _context8.next) {
           case 0:
-            if (!port) {
-              _context7.next = 5;
+            if (!blinkenlights.isConnected()) {
+              _context8.next = 4;
               break;
             }
 
-            _context7.next = 3;
-            return disconnect();
-
-          case 3:
+            blinkenlights.disconnect();
             toggleUIConnected(false);
-            return _context7.abrupt("return");
+            return _context8.abrupt("return");
 
-          case 5:
-            _context7.next = 7;
-            return connect();
+          case 4:
+            _context8.next = 6;
+            return blinkenlights.connect();
 
-          case 7:
+          case 6:
+            blinkenlights.run();
             toggleUIConnected(true);
             if (currentImage) sendGifAnimation(currentImage);
 
           case 9:
           case "end":
-            return _context7.stop();
+            return _context8.stop();
         }
       }
-    }, _callee3);
+    }, _callee4);
   }));
   return _clickConnect.apply(this, arguments);
 }
@@ -12270,88 +12608,31 @@ function _clickConnect() {
 function clickSend() {
   return _clickSend.apply(this, arguments);
 }
-/**
- * @name readLoop
- * Reads data from the input stream and displays it on screen.
- */
-
 
 function _clickSend() {
-  _clickSend = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee4() {
-    return regeneratorRuntime.wrap(function _callee4$(_context8) {
-      while (1) {
-        switch (_context8.prev = _context8.next) {
-          case 0:
-            if (port) {
-              _context8.next = 2;
-              break;
-            }
-
-            return _context8.abrupt("return");
-
-          case 2:
-            writeToStream(commandTextInput.value);
-
-          case 3:
-          case "end":
-            return _context8.stop();
-        }
-      }
-    }, _callee4);
-  }));
-  return _clickSend.apply(this, arguments);
-}
-
-function readLoop() {
-  return _readLoop.apply(this, arguments);
-}
-
-function _readLoop() {
-  _readLoop = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee5() {
-    var _yield$reader$read, value, done;
-
+  _clickSend = _asyncToGenerator( /*#__PURE__*/regeneratorRuntime.mark(function _callee5() {
     return regeneratorRuntime.wrap(function _callee5$(_context9) {
       while (1) {
         switch (_context9.prev = _context9.next) {
           case 0:
-            if (!true) {
-              _context9.next = 13;
+            if (port) {
+              _context9.next = 2;
               break;
             }
 
-            _context9.next = 3;
-            return reader.read();
+            return _context9.abrupt("return");
+
+          case 2:
+            blinkenlights.sendCommands(commandTextInput.value);
 
           case 3:
-            _yield$reader$read = _context9.sent;
-            value = _yield$reader$read.value;
-            done = _yield$reader$read.done;
-
-            if (value) {
-              console.log('[RECV]' + value + '\n');
-            }
-
-            if (!done) {
-              _context9.next = 11;
-              break;
-            }
-
-            console.log('[readLoop] DONE', done);
-            reader.releaseLock();
-            return _context9.abrupt("break", 13);
-
-          case 11:
-            _context9.next = 0;
-            break;
-
-          case 13:
           case "end":
             return _context9.stop();
         }
       }
     }, _callee5);
   }));
-  return _readLoop.apply(this, arguments);
+  return _clickSend.apply(this, arguments);
 }
 
 var Frame = function Frame(ms, pixels) {
@@ -12387,17 +12668,6 @@ var Animation = /*#__PURE__*/function () {
 
   return Animation;
 }();
-
-function sendAnimation(anim) {
-  writeToStream('ANM ' + anim.duration);
-  anim.frames.forEach(function (frame) {
-    writeToStream('FRM ' + frame.duration);
-    frame.rows.forEach(function (row) {
-      return writeToStream('RGB ' + row);
-    });
-  });
-  writeToStream('DON', 'NXT');
-}
 /**
  * @name sendGifAnimation
  * Sends a GIF animation to the display
@@ -12439,72 +12709,19 @@ function sendGifAnimation(img) {
 
           animation.addFrame(new Frame('delay' in gifFrame ? gifFrame.delay : 1000, pixels));
         });
-        sendAnimation(animation);
+        blinkenlights.sendAnimation(animation);
       }
     }
   };
 
   oReq.send(null);
 }
-/**
- * @name writeToStream
- * Gets a writer from the output stream and send the lines to the micro:bit.
- * @param  {...string} lines lines to send to the micro:bit
- */
-
-
-function writeToStream() {
-  var writer = outputStream.getWriter();
-
-  for (var _len = arguments.length, lines = new Array(_len), _key = 0; _key < _len; _key++) {
-    lines[_key] = arguments[_key];
-  }
-
-  lines.forEach(function (line) {
-    console.log('[SEND]', line);
-    writer.write(line + '\n');
-  });
-  writer.releaseLock();
-}
-/**
- * @name LineBreakTransformer
- * TransformStream to parse the stream into lines.
- */
-
-
-var LineBreakTransformer = /*#__PURE__*/function () {
-  function LineBreakTransformer() {
-    _classCallCheck(this, LineBreakTransformer);
-
-    // A container for holding stream data until a new line.
-    this.container = '';
-  }
-
-  _createClass(LineBreakTransformer, [{
-    key: "transform",
-    value: function transform(chunk, controller) {
-      this.container += chunk;
-      var lines = this.container.split('\n');
-      this.container = lines.pop();
-      lines.forEach(function (line) {
-        return controller.enqueue(line);
-      });
-    }
-  }, {
-    key: "flush",
-    value: function flush(controller) {
-      controller.enqueue(this.container);
-    }
-  }]);
-
-  return LineBreakTransformer;
-}();
 
 function initPixelArtImage(img) {
   img.crossOrigin = "Anonymous";
 
   img.onclick = function () {
-    if (port) sendGifAnimation(img);
+    sendGifAnimation(img);
     currentImage = img;
   };
 }
@@ -12561,29 +12778,29 @@ var Digits = [[[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]], [[0, 1, 0
 
 function fillRowIterator(color) {
   var c;
-  return regeneratorRuntime.wrap(function fillRowIterator$(_context) {
+  return regeneratorRuntime.wrap(function fillRowIterator$(_context4) {
     while (1) {
-      switch (_context.prev = _context.next) {
+      switch (_context4.prev = _context4.next) {
         case 0:
           c = 0;
 
         case 1:
           if (!(c < COLS)) {
-            _context.next = 7;
+            _context4.next = 7;
             break;
           }
 
-          _context.next = 4;
+          _context4.next = 4;
           return color;
 
         case 4:
           c++;
-          _context.next = 1;
+          _context4.next = 1;
           break;
 
         case 7:
         case "end":
-          return _context.stop();
+          return _context4.stop();
       }
     }
   }, _marked);
@@ -12591,29 +12808,29 @@ function fillRowIterator(color) {
 
 function bitmapRowIterator(row, fg, bg) {
   var i;
-  return regeneratorRuntime.wrap(function bitmapRowIterator$(_context2) {
+  return regeneratorRuntime.wrap(function bitmapRowIterator$(_context5) {
     while (1) {
-      switch (_context2.prev = _context2.next) {
+      switch (_context5.prev = _context5.next) {
         case 0:
           i = 0;
 
         case 1:
           if (!(i < row.length)) {
-            _context2.next = 7;
+            _context5.next = 7;
             break;
           }
 
-          _context2.next = 4;
+          _context5.next = 4;
           return row[i] ? fg : bg;
 
         case 4:
           i++;
-          _context2.next = 1;
+          _context5.next = 1;
           break;
 
         case 7:
         case "end":
-          return _context2.stop();
+          return _context5.stop();
       }
     }
   }, _marked2);
@@ -12621,41 +12838,41 @@ function bitmapRowIterator(row, fg, bg) {
 
 function digitRowIterator(row, h10, h1, m10, m1, fg, bg, colon) {
   var center;
-  return regeneratorRuntime.wrap(function digitRowIterator$(_context3) {
+  return regeneratorRuntime.wrap(function digitRowIterator$(_context6) {
     while (1) {
-      switch (_context3.prev = _context3.next) {
+      switch (_context6.prev = _context6.next) {
         case 0:
-          return _context3.delegateYield(bitmapRowIterator(Digits[h10][row], fg, bg), "t0", 1);
+          return _context6.delegateYield(bitmapRowIterator(Digits[h10][row], fg, bg), "t0", 1);
 
         case 1:
-          _context3.next = 3;
+          _context6.next = 3;
           return bg;
 
         case 3:
-          return _context3.delegateYield(bitmapRowIterator(Digits[h1][row], fg, bg), "t1", 4);
+          return _context6.delegateYield(bitmapRowIterator(Digits[h1][row], fg, bg), "t1", 4);
 
         case 4:
           center = row % 2 ? colon : bg;
-          _context3.next = 7;
+          _context6.next = 7;
           return center;
 
         case 7:
-          _context3.next = 9;
+          _context6.next = 9;
           return center;
 
         case 9:
-          return _context3.delegateYield(bitmapRowIterator(Digits[m10][row], fg, bg), "t2", 10);
+          return _context6.delegateYield(bitmapRowIterator(Digits[m10][row], fg, bg), "t2", 10);
 
         case 10:
-          _context3.next = 12;
+          _context6.next = 12;
           return bg;
 
         case 12:
-          return _context3.delegateYield(bitmapRowIterator(Digits[m1][row], fg, bg), "t3", 13);
+          return _context6.delegateYield(bitmapRowIterator(Digits[m1][row], fg, bg), "t3", 13);
 
         case 13:
         case "end":
-          return _context3.stop();
+          return _context6.stop();
       }
     }
   }, _marked3);
@@ -12663,24 +12880,24 @@ function digitRowIterator(row, h10, h1, m10, m1, fg, bg, colon) {
 
 function digitalClockIterator(h10, h1, m10, m1, fg, bg, colon) {
   var r;
-  return regeneratorRuntime.wrap(function digitalClockIterator$(_context4) {
+  return regeneratorRuntime.wrap(function digitalClockIterator$(_context7) {
     while (1) {
-      switch (_context4.prev = _context4.next) {
+      switch (_context7.prev = _context7.next) {
         case 0:
           r = 0;
 
         case 1:
           if (!(r < CLOCK_VERTICAL_OFFSET)) {
-            _context4.next = 7;
+            _context7.next = 7;
             break;
           }
 
-          _context4.next = 4;
+          _context7.next = 4;
           return fillRowIterator(bg);
 
         case 4:
           r++;
-          _context4.next = 1;
+          _context7.next = 1;
           break;
 
         case 7:
@@ -12688,16 +12905,16 @@ function digitalClockIterator(h10, h1, m10, m1, fg, bg, colon) {
 
         case 8:
           if (!(r < DIGIT_ROWS)) {
-            _context4.next = 14;
+            _context7.next = 14;
             break;
           }
 
-          _context4.next = 11;
+          _context7.next = 11;
           return digitRowIterator(r, h10, h1, m10, m1, fg, bg, colon);
 
         case 11:
           r++;
-          _context4.next = 8;
+          _context7.next = 8;
           break;
 
         case 14:
@@ -12705,21 +12922,21 @@ function digitalClockIterator(h10, h1, m10, m1, fg, bg, colon) {
 
         case 15:
           if (!(r < ROWS - (CLOCK_VERTICAL_OFFSET + DIGIT_ROWS))) {
-            _context4.next = 21;
+            _context7.next = 21;
             break;
           }
 
-          _context4.next = 18;
+          _context7.next = 18;
           return fillRowIterator(bg);
 
         case 18:
           r++;
-          _context4.next = 15;
+          _context7.next = 15;
           break;
 
         case 21:
         case "end":
-          return _context4.stop();
+          return _context7.stop();
       }
     }
   }, _marked4);
@@ -12732,8 +12949,70 @@ function drawClockMinute(fg, bg, colon) {
   var animation = new Animation(60000);
   animation.addFrame(new Frame(500, digitalClockIterator(Math.floor(hours / 10), hours % 10, Math.floor(minutes / 10), minutes % 10, fg, bg, colon)));
   animation.addFrame(new Frame(500, digitalClockIterator(Math.floor(hours / 10), hours % 10, Math.floor(minutes / 10), minutes % 10, fg, bg, bg)));
-  sendAnimation(animation);
+  blinkenlights.sendAnimation(animation);
 }
+
+_dropzone.Dropzone.options.gifDropzone = {
+  autoProcessQueue: false,
+  autoQueue: false,
+  createImageThumbnails: false,
+  accept: function accept(file, done) {
+    var fr = new FileReader();
+
+    fr.onload = function () {
+      var img = document.createElement('img');
+      img.src = fr.result;
+      var oReq = new XMLHttpRequest();
+      oReq.open('GET', img.src, true);
+      oReq.responseType = 'arraybuffer';
+
+      oReq.onload = function (oEvent) {
+        var arrayBuffer = oReq.response;
+
+        if (arrayBuffer) {
+          var gif = (0, _gifuctJs.parseGIF)(arrayBuffer);
+
+          if (gif.lsd.width != ROWS || gif.lsd.height != COLS) {
+            console.log(file.name + ": only " + ROWS + "x" + COLS + " GIF supported");
+            return;
+          }
+
+          img.className = "pixelArt";
+          initPixelArtImage(img);
+          pixelArtContainer.appendChild(img);
+        }
+      };
+
+      oReq.send(null);
+    };
+
+    fr.readAsDataURL(file);
+
+    _dropzone.Dropzone.forElement('#gif-dropzone').removeFile(file);
+
+    done();
+  },
+  init: function init() {
+    console.log("Dropzone init!");
+  }
+};
+document.addEventListener('DOMContentLoaded', function () {
+  blinkenlights = new Blinkenlights();
+  butConnect.addEventListener('click', clickConnect);
+  butSend.addEventListener('click', clickSend);
+  var notSupported = document.getElementById('notSupported');
+  notSupported.classList.toggle('hidden', 'serial' in navigator);
+  document.querySelectorAll('img.pixelArt').forEach(initPixelArtImage);
+  initGamma(DEFAULT_GAMMA);
+
+  debugButton.onclick = function () {
+    blinkenlights.sendCommands('DBG');
+  };
+
+  clockButton.onclick = function () {
+    drawClockMinute([0xff, 0xff, 0xff], [0x00, 0x00, 0x00], [0x00, 0x00, 0xff]);
+  };
+});
 
 },{"./style.css":11,"dropzone":2,"gifuct-js":4,"regenerator-runtime/runtime":9}],11:[function(require,module,exports){
 var css = "/*\n * @license\n * Copyright 2019 Google Inc. All rights reserved.\n *\n * Licensed under the Apache License, Version 2.0 (the \"License\");\n * you may not use this file except in compliance with the License.\n * You may obtain a copy of the License at\n *\n *     https://www.apache.org/licenses/LICENSE-2.0\n *\n * Unless required by applicable law or agreed to in writing, software\n * distributed under the License is distributed on an \"AS IS\" BASIS,\n * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n * See the License for the specific language governing permissions and\n * limitations under the License\n */\n@-webkit-keyframes passing-through {\n  0% {\n    opacity: 0;\n    -webkit-transform: translateY(40px);\n    -moz-transform: translateY(40px);\n    -ms-transform: translateY(40px);\n    -o-transform: translateY(40px);\n    transform: translateY(40px);\n  }\n\n  30%, 70% {\n    opacity: 1;\n    -webkit-transform: translateY(0px);\n    -moz-transform: translateY(0px);\n    -ms-transform: translateY(0px);\n    -o-transform: translateY(0px);\n    transform: translateY(0px);\n  }\n\n  100% {\n    opacity: 0;\n    -webkit-transform: translateY(-40px);\n    -moz-transform: translateY(-40px);\n    -ms-transform: translateY(-40px);\n    -o-transform: translateY(-40px);\n    transform: translateY(-40px);\n  }\n}\n@-moz-keyframes passing-through {\n  0% {\n    opacity: 0;\n    -webkit-transform: translateY(40px);\n    -moz-transform: translateY(40px);\n    -ms-transform: translateY(40px);\n    -o-transform: translateY(40px);\n    transform: translateY(40px);\n  }\n\n  30%, 70% {\n    opacity: 1;\n    -webkit-transform: translateY(0px);\n    -moz-transform: translateY(0px);\n    -ms-transform: translateY(0px);\n    -o-transform: translateY(0px);\n    transform: translateY(0px);\n  }\n\n  100% {\n    opacity: 0;\n    -webkit-transform: translateY(-40px);\n    -moz-transform: translateY(-40px);\n    -ms-transform: translateY(-40px);\n    -o-transform: translateY(-40px);\n    transform: translateY(-40px);\n  }\n}\n@keyframes passing-through {\n  0% {\n    opacity: 0;\n    -webkit-transform: translateY(40px);\n    -moz-transform: translateY(40px);\n    -ms-transform: translateY(40px);\n    -o-transform: translateY(40px);\n    transform: translateY(40px);\n  }\n\n  30%, 70% {\n    opacity: 1;\n    -webkit-transform: translateY(0px);\n    -moz-transform: translateY(0px);\n    -ms-transform: translateY(0px);\n    -o-transform: translateY(0px);\n    transform: translateY(0px);\n  }\n\n  100% {\n    opacity: 0;\n    -webkit-transform: translateY(-40px);\n    -moz-transform: translateY(-40px);\n    -ms-transform: translateY(-40px);\n    -o-transform: translateY(-40px);\n    transform: translateY(-40px);\n  }\n}\n@-webkit-keyframes slide-in {\n  0% {\n    opacity: 0;\n    -webkit-transform: translateY(40px);\n    -moz-transform: translateY(40px);\n    -ms-transform: translateY(40px);\n    -o-transform: translateY(40px);\n    transform: translateY(40px);\n  }\n\n  30% {\n    opacity: 1;\n    -webkit-transform: translateY(0px);\n    -moz-transform: translateY(0px);\n    -ms-transform: translateY(0px);\n    -o-transform: translateY(0px);\n    transform: translateY(0px);\n  }\n}\n@-moz-keyframes slide-in {\n  0% {\n    opacity: 0;\n    -webkit-transform: translateY(40px);\n    -moz-transform: translateY(40px);\n    -ms-transform: translateY(40px);\n    -o-transform: translateY(40px);\n    transform: translateY(40px);\n  }\n\n  30% {\n    opacity: 1;\n    -webkit-transform: translateY(0px);\n    -moz-transform: translateY(0px);\n    -ms-transform: translateY(0px);\n    -o-transform: translateY(0px);\n    transform: translateY(0px);\n  }\n}\n@keyframes slide-in {\n  0% {\n    opacity: 0;\n    -webkit-transform: translateY(40px);\n    -moz-transform: translateY(40px);\n    -ms-transform: translateY(40px);\n    -o-transform: translateY(40px);\n    transform: translateY(40px);\n  }\n\n  30% {\n    opacity: 1;\n    -webkit-transform: translateY(0px);\n    -moz-transform: translateY(0px);\n    -ms-transform: translateY(0px);\n    -o-transform: translateY(0px);\n    transform: translateY(0px);\n  }\n}\n@-webkit-keyframes pulse {\n  0% {\n    -webkit-transform: scale(1);\n    -moz-transform: scale(1);\n    -ms-transform: scale(1);\n    -o-transform: scale(1);\n    transform: scale(1);\n  }\n\n  10% {\n    -webkit-transform: scale(1.1);\n    -moz-transform: scale(1.1);\n    -ms-transform: scale(1.1);\n    -o-transform: scale(1.1);\n    transform: scale(1.1);\n  }\n\n  20% {\n    -webkit-transform: scale(1);\n    -moz-transform: scale(1);\n    -ms-transform: scale(1);\n    -o-transform: scale(1);\n    transform: scale(1);\n  }\n}\n@-moz-keyframes pulse {\n  0% {\n    -webkit-transform: scale(1);\n    -moz-transform: scale(1);\n    -ms-transform: scale(1);\n    -o-transform: scale(1);\n    transform: scale(1);\n  }\n\n  10% {\n    -webkit-transform: scale(1.1);\n    -moz-transform: scale(1.1);\n    -ms-transform: scale(1.1);\n    -o-transform: scale(1.1);\n    transform: scale(1.1);\n  }\n\n  20% {\n    -webkit-transform: scale(1);\n    -moz-transform: scale(1);\n    -ms-transform: scale(1);\n    -o-transform: scale(1);\n    transform: scale(1);\n  }\n}\n@keyframes pulse {\n  0% {\n    -webkit-transform: scale(1);\n    -moz-transform: scale(1);\n    -ms-transform: scale(1);\n    -o-transform: scale(1);\n    transform: scale(1);\n  }\n\n  10% {\n    -webkit-transform: scale(1.1);\n    -moz-transform: scale(1.1);\n    -ms-transform: scale(1.1);\n    -o-transform: scale(1.1);\n    transform: scale(1.1);\n  }\n\n  20% {\n    -webkit-transform: scale(1);\n    -moz-transform: scale(1);\n    -ms-transform: scale(1);\n    -o-transform: scale(1);\n    transform: scale(1);\n  }\n}\n.dropzone,\n.dropzone * {\n  box-sizing: border-box;\n}\n.dropzone {\n  min-height: 150px;\n  border: 2px solid rgba(0, 0, 0, 0.3);\n  background: white;\n  padding: 20px 20px;\n}\n.dropzone.dz-clickable {\n  cursor: pointer;\n}\n.dropzone.dz-clickable * {\n  cursor: default;\n}\n.dropzone.dz-clickable .dz-message,\n.dropzone.dz-clickable .dz-message * {\n  cursor: pointer;\n}\n.dropzone.dz-started .dz-message {\n  display: none;\n}\n.dropzone.dz-drag-hover {\n  border-style: solid;\n}\n.dropzone.dz-drag-hover .dz-message {\n  opacity: 0.5;\n}\n.dropzone .dz-message {\n  text-align: center;\n  margin: 2em 0;\n}\n.dropzone .dz-message .dz-button {\n  background: none;\n  color: inherit;\n  border: none;\n  padding: 0;\n  font: inherit;\n  cursor: pointer;\n  outline: inherit;\n}\n.dropzone .dz-preview {\n  position: relative;\n  display: inline-block;\n  vertical-align: top;\n  margin: 16px;\n  min-height: 100px;\n}\n.dropzone .dz-preview:hover {\n  z-index: 1000;\n}\n.dropzone .dz-preview:hover .dz-details {\n  opacity: 1;\n}\n.dropzone .dz-preview.dz-file-preview .dz-image {\n  border-radius: 20px;\n  background: #999;\n  background: linear-gradient(to bottom, #eee, #ddd);\n}\n.dropzone .dz-preview.dz-file-preview .dz-details {\n  opacity: 1;\n}\n.dropzone .dz-preview.dz-image-preview {\n  background: white;\n}\n.dropzone .dz-preview.dz-image-preview .dz-details {\n  -webkit-transition: opacity 0.2s linear;\n  -moz-transition: opacity 0.2s linear;\n  -ms-transition: opacity 0.2s linear;\n  -o-transition: opacity 0.2s linear;\n  transition: opacity 0.2s linear;\n}\n.dropzone .dz-preview .dz-remove {\n  font-size: 14px;\n  text-align: center;\n  display: block;\n  cursor: pointer;\n  border: none;\n}\n.dropzone .dz-preview .dz-remove:hover {\n  text-decoration: underline;\n}\n.dropzone .dz-preview:hover .dz-details {\n  opacity: 1;\n}\n.dropzone .dz-preview .dz-details {\n  z-index: 20;\n  position: absolute;\n  top: 0;\n  left: 0;\n  opacity: 0;\n  font-size: 13px;\n  min-width: 100%;\n  max-width: 100%;\n  padding: 2em 1em;\n  text-align: center;\n  color: rgba(0, 0, 0, 0.9);\n  line-height: 150%;\n}\n.dropzone .dz-preview .dz-details .dz-size {\n  margin-bottom: 1em;\n  font-size: 16px;\n}\n.dropzone .dz-preview .dz-details .dz-filename {\n  white-space: nowrap;\n}\n.dropzone .dz-preview .dz-details .dz-filename:hover span {\n  border: 1px solid rgba(200, 200, 200, 0.8);\n  background-color: rgba(255, 255, 255, 0.8);\n}\n.dropzone .dz-preview .dz-details .dz-filename:not(:hover) {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n.dropzone .dz-preview .dz-details .dz-filename:not(:hover) span {\n  border: 1px solid transparent;\n}\n.dropzone .dz-preview .dz-details .dz-filename span,\n.dropzone .dz-preview .dz-details .dz-size span {\n  background-color: rgba(255, 255, 255, 0.4);\n  padding: 0 0.4em;\n  border-radius: 3px;\n}\n.dropzone .dz-preview:hover .dz-image img {\n  -webkit-transform: scale(1.05, 1.05);\n  -moz-transform: scale(1.05, 1.05);\n  -ms-transform: scale(1.05, 1.05);\n  -o-transform: scale(1.05, 1.05);\n  transform: scale(1.05, 1.05);\n  -webkit-filter: blur(8px);\n  filter: blur(8px);\n}\n.dropzone .dz-preview .dz-image {\n  border-radius: 20px;\n  overflow: hidden;\n  width: 120px;\n  height: 120px;\n  position: relative;\n  display: block;\n  z-index: 10;\n}\n.dropzone .dz-preview .dz-image img {\n  display: block;\n}\n.dropzone .dz-preview.dz-success .dz-success-mark {\n  -webkit-animation: passing-through 3s cubic-bezier(0.77, 0, 0.175, 1);\n  -moz-animation: passing-through 3s cubic-bezier(0.77, 0, 0.175, 1);\n  -ms-animation: passing-through 3s cubic-bezier(0.77, 0, 0.175, 1);\n  -o-animation: passing-through 3s cubic-bezier(0.77, 0, 0.175, 1);\n  animation: passing-through 3s cubic-bezier(0.77, 0, 0.175, 1);\n}\n.dropzone .dz-preview.dz-error .dz-error-mark {\n  opacity: 1;\n  -webkit-animation: slide-in 3s cubic-bezier(0.77, 0, 0.175, 1);\n  -moz-animation: slide-in 3s cubic-bezier(0.77, 0, 0.175, 1);\n  -ms-animation: slide-in 3s cubic-bezier(0.77, 0, 0.175, 1);\n  -o-animation: slide-in 3s cubic-bezier(0.77, 0, 0.175, 1);\n  animation: slide-in 3s cubic-bezier(0.77, 0, 0.175, 1);\n}\n.dropzone .dz-preview .dz-success-mark,\n.dropzone .dz-preview .dz-error-mark {\n  pointer-events: none;\n  opacity: 0;\n  z-index: 500;\n  position: absolute;\n  display: block;\n  top: 50%;\n  left: 50%;\n  margin-left: -27px;\n  margin-top: -27px;\n}\n.dropzone .dz-preview .dz-success-mark svg,\n.dropzone .dz-preview .dz-error-mark svg {\n  display: block;\n  width: 54px;\n  height: 54px;\n}\n.dropzone .dz-preview.dz-processing .dz-progress {\n  opacity: 1;\n  -webkit-transition: all 0.2s linear;\n  -moz-transition: all 0.2s linear;\n  -ms-transition: all 0.2s linear;\n  -o-transition: all 0.2s linear;\n  transition: all 0.2s linear;\n}\n.dropzone .dz-preview.dz-complete .dz-progress {\n  opacity: 0;\n  -webkit-transition: opacity 0.4s ease-in;\n  -moz-transition: opacity 0.4s ease-in;\n  -ms-transition: opacity 0.4s ease-in;\n  -o-transition: opacity 0.4s ease-in;\n  transition: opacity 0.4s ease-in;\n}\n.dropzone .dz-preview:not(.dz-processing) .dz-progress {\n  -webkit-animation: pulse 6s ease infinite;\n  -moz-animation: pulse 6s ease infinite;\n  -ms-animation: pulse 6s ease infinite;\n  -o-animation: pulse 6s ease infinite;\n  animation: pulse 6s ease infinite;\n}\n.dropzone .dz-preview .dz-progress {\n  opacity: 1;\n  z-index: 1000;\n  pointer-events: none;\n  position: absolute;\n  height: 16px;\n  left: 50%;\n  top: 50%;\n  margin-top: -8px;\n  width: 80px;\n  margin-left: -40px;\n  background: rgba(255, 255, 255, 0.9);\n  -webkit-transform: scale(1);\n  border-radius: 8px;\n  overflow: hidden;\n}\n.dropzone .dz-preview .dz-progress .dz-upload {\n  background: #333;\n  background: linear-gradient(to bottom, #666, #444);\n  position: absolute;\n  top: 0;\n  left: 0;\n  bottom: 0;\n  width: 0;\n  -webkit-transition: width 300ms ease-in-out;\n  -moz-transition: width 300ms ease-in-out;\n  -ms-transition: width 300ms ease-in-out;\n  -o-transition: width 300ms ease-in-out;\n  transition: width 300ms ease-in-out;\n}\n.dropzone .dz-preview.dz-error .dz-error-message {\n  display: block;\n}\n.dropzone .dz-preview.dz-error:hover .dz-error-message {\n  opacity: 1;\n  pointer-events: auto;\n}\n.dropzone .dz-preview .dz-error-message {\n  pointer-events: none;\n  z-index: 1000;\n  position: absolute;\n  display: block;\n  display: none;\n  opacity: 0;\n  -webkit-transition: opacity 0.3s ease;\n  -moz-transition: opacity 0.3s ease;\n  -ms-transition: opacity 0.3s ease;\n  -o-transition: opacity 0.3s ease;\n  transition: opacity 0.3s ease;\n  border-radius: 8px;\n  font-size: 13px;\n  top: 130px;\n  left: -10px;\n  width: 140px;\n  background: #be2626;\n  background: linear-gradient(to bottom, #be2626, #a92222);\n  padding: 0.5em 1.2em;\n  color: white;\n}\n.dropzone .dz-preview .dz-error-message:after {\n  content: \"\";\n  position: absolute;\n  top: -6px;\n  left: 64px;\n  width: 0;\n  height: 0;\n  border-left: 6px solid transparent;\n  border-right: 6px solid transparent;\n  border-bottom: 6px solid #be2626;\n}\n* {\n  box-sizing: border-box;\n}\nhtml,\nbody {\n  color: #444;\n  font-family: 'Helvetica', 'Verdana', sans-serif;\n  -moz-osx-font-smoothing: grayscale;\n  -webkit-font-smoothing: antialiased;\n  height: 100%;\n  margin: 0;\n  padding: 0;\n  width: 100%;\n}\nhtml {\n  overflow: hidden;\n}\nbody {\n  align-content: stretch;\n  align-items: stretch;\n  background: #ececec;\n  display: flex;\n  flex-direction: column;\n  flex-wrap: nowrap;\n  justify-content: flex-start;\n}\n/**\n * Header\n */\n.header {\n  align-content: center;\n  align-items: stretch;\n  background: #3f51b5;\n  box-shadow: 0 4px 5px 0 rgba(0, 0, 0, 0.14),\n    0 2px 9px 1px rgba(0, 0, 0, 0.12),\n    0 4px 2px -2px rgba(0, 0, 0, 0.2);\n  color: #fff;\n  display: flex;\n  flex-direction: row;\n  flex-wrap: nowrap;\n  font-size: 20px;\n  height: 56px;\n  justify-content: flex-start;\n  padding: 16px 16px 0 16px;\n  position: fixed;\n  transition: transform 0.233s cubic-bezier(0, 0, 0.21, 1) 0.1s;\n  width: 100%;\n  will-change: transform;\n  z-index: 1000;\n}\n.header h1 {\n  flex: 1;\n  font-size: 20px;\n  font-weight: 400;\n  margin: 0;\n}\n/**\n * Main body\n */\n.main {\n  flex: 1;\n  overflow-x: hidden;\n  overflow-y: auto;\n  padding-top: 70px;\n  padding-left: 1em;\n  padding-right: 1em;\n}\n.hidden {\n  display: none;\n}\n#notSupported {\n  padding: 1em;\n  background-color: red;\n  color: white;\n  margin-top: 1em;\n  margin-bottom: 1em;\n}\n#matrix {\n  display: flex;\n}\n.ledMatrix {\n  margin-left: 10px;\n  margin-right: 10px;\n}\nimg.pixelArt {\n  height: 48px;\n}\n"; (require("browserify-css").createStyle(css, { "href": "style.css" }, { "insertAt": "bottom" })); module.exports = css;
