@@ -5,9 +5,9 @@
 namespace blink {
 namespace util {
 
-bool ParseUInt32(uint32_t *i, const char *from, const char *to) {
+bool ParseUInt32(uint32_t *i, const char *from) {
   uint32_t acc = 0;
-  while (from < to) {
+  while (*from) {
     char c = *from++;
     if (!isdigit(c)) return false;
     acc = acc * 10 + (c - '0');
@@ -16,9 +16,9 @@ bool ParseUInt32(uint32_t *i, const char *from, const char *to) {
   return true;
 }
 
-bool ParseHex(uint8_t *buf, const char *from, const char *to) {
+bool ParseHex(uint8_t *buf, const char *from) {
   bool half = false;
-  while (from < to) {
+  while (*from) {
     char c = *from++;
     uint8_t d;
     if (isdigit(c)) {

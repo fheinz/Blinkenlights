@@ -59,13 +59,11 @@ class Frame {
   // Stops when the frame is loaded and returns true, even if it hasn't consumed
   // the whole buffer.
   // Returns false if the buffer can't be parsed.
-  bool LoadPartFromAsciiHexBuffer(const char* buffer_from,
-                                  const char* buffer_to) {
+  bool LoadPartFromAsciiHexBuffer(const char* buffer) {
     size_t max_to_load = kNumBytes - load_next_idx_;
-    size_t want_to_load = (buffer_to - buffer_from) / 2;
+    size_t want_to_load = strlen(buffer) / 2;
     size_t to_load = want_to_load <= max_to_load ? want_to_load : max_to_load;
-    if (!blink::util::ParseHex(pixels_ + load_next_idx_, buffer_from,
-                               buffer_from + to_load * 2)) {
+    if (!blink::util::ParseHex(pixels_ + load_next_idx_, buffer)) {
       return false;
     }
     load_next_idx_ += to_load;  // Two hex digits make a byte.

@@ -71,10 +71,18 @@ enum class UsbCurrentAvailable {
   kUsbStd,
 };
 
+enum MatrixRotation { k000, k090, k180, k270, kNumRotations };
+
 // LED Matrix dimensions
 constexpr int kLedMatrixNumCols = 16;
 constexpr int kLedMatrixNumLines = 16;
 constexpr int kLedMatrixNumLeds = kLedMatrixNumCols * kLedMatrixNumLines;
+
+typedef struct {
+  const char *command;
+  void (*implementation)(const char *[], const int);
+} DispatchEntry;
+
 
 /*
  * Called on violation of invariants. May be used for desperate
@@ -83,8 +91,6 @@ constexpr int kLedMatrixNumLeds = kLedMatrixNumCols * kLedMatrixNumLines;
  *
  * Parameters:
  *    err:  informational error code
- *    from: start of the string representation
- *    to:   end of the string representation
  */
 
 enum class ErrorCode {
@@ -115,21 +121,6 @@ float AnalogReadV(int pin) { return analogRead(pin) * 3.96f / 4096; }
  */
 UsbCurrentAvailable PowerOverride = UsbCurrentAvailable::kNone;
 constexpr char PowerOverridePrefsKey[] = "PowerOverride";
-
-void SetPowerOverride(UsbCurrentAvailable c) {
-  PowerOverride = c;
-  preferences.putUInt(PowerOverridePrefsKey, (uint8_t)c);
-}
-
-void ResetPowerOverride() {
-  preferences.remove(PowerOverridePrefsKey);
-  PowerOverride = UsbCurrentAvailable::kNone;
-}
-
-void GetPowerOverride() {
-  PowerOverride = (UsbCurrentAvailable)preferences.getUInt(
-      PowerOverridePrefsKey, (uint8_t)UsbCurrentAvailable::kNone);
-}
 
 UsbCurrentAvailable DetermineMaxCurrent() {
   if (PowerOverride != UsbCurrentAvailable::kNone) return PowerOverride;
@@ -220,8 +211,6 @@ uint32_t PowerUpdate() {
 /*
  * A LED matrix that can display frames.
  */
-enum MatrixRotation { k000, k090, k180, k270, kNumRotations };
-constexpr char MatrixRotationPrefsKey[] = "MatrixRotation";
 template <size_t width, size_t height, uint8_t pin>
 class LedMatrix {
  private:
@@ -450,39 +439,6 @@ inline Stream &Comm() {
   return Serial;
 }
 
-void ReportPower(UsbCurrentAvailable pwr) {
-  switch (pwr) {
-    case UsbCurrentAvailable::kNone:
-      Comm().println(F("PWR ???A"));
-      break;
-    case UsbCurrentAvailable::k3A:
-      Comm().println(F("PWR 3.0A"));
-      break;
-    case UsbCurrentAvailable::k1_5A:
-      Comm().println(F("PWR 1.5A"));
-      break;
-    default:
-      Comm().println(F("PWR 0.5A"));
-  }
-}
-
-
-/*
- * Color Correction preference management.
- */
-constexpr char ColorCorrectionPrefsKey[] = "ColorCorrection";
-void SetColorCorrectionPref(CRGB cc) {
-  preferences.putUInt(ColorCorrectionPrefsKey, (cc.red<<16)|(cc.green<<8)|cc.blue);
-}
-
-CRGB GetColorCorrectionPref() {
-  return CRGB(preferences.getUInt(ColorCorrectionPrefsKey, LEDColorCorrection::Typical8mmPixel));
-}
-
-void ResetColorCorrectionPref() {
-  preferences.remove(ColorCorrectionPrefsKey);
-}
-
 
 /*
  * Protocol parser & dispatcher
@@ -504,10 +460,12 @@ void ResetColorCorrectionPref() {
  *    DIM <0..255>      brightness value
  *    DTH ON|OFF        brightness dithering
  *    RGB <RGB STRING>  RGB values for one row (16x3 8-bit hex values) of a
- * frame FRM <MILLIS>      start a frame to display for <MILLIS>ms ANM <MILLIS>
- * start an animation to display for <MILLIS>ms DON               wrap up and
- * enqueue animation NXT               immediately terminate current animation
- * and start the next
+ *                      frame
+ *    FRM <MILLIS>      start a frame to display for <MILLIS>ms
+ *    ANM <MILLIS>      start an animation to display for <MILLIS> ms
+ *    DON               wrap up and enqueue animation
+ *    NXT               immediately terminate current animation
+ *                      and start the next
  *
  * Example conversation:
  *   --> VER
@@ -536,214 +494,501 @@ void ResetColorCorrectionPref() {
  *   --> RST
  *   <-- ACK RST
  */
-#define BUFLEN 100
-char inputBuffer[BUFLEN];
-char *bufP;
-bool lineTooLong;
 
-void ProcessCommand() {
-  static blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines>
-      *frame_being_loaded = nullptr;
-  int l = bufP - inputBuffer;
-  if (lineTooLong) {
-    Comm().println(F("NAK LIN"));
-    return;
+#define COMMAND_MAXLEN 100
+#define COMMAND_MAXWORDS 4
+
+
+void ReportError(const char *cmd, const char *err) {
+  Comm().print(F("NAK "));
+  Comm().print(cmd);
+  Comm().print(F(" "));
+  Comm().println(err);
+}
+
+
+void ArgumentError(const char *cmd) {
+  ReportError(cmd, "ARG");
+}
+
+
+/*
+ * Query the protocol version.
+ */
+void VersionCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+    Comm().print(F("ACK "));
+    Comm().print(wordv[0]);
+    Comm().println(F(" 1.0"));
+  } else {
+    ArgumentError(wordv[0]);
   }
-  if (l > 4) {
-    if (!strncmp("CLC ", inputBuffer, 4)) {
-      if (l == 7 && !strncmp("RST", inputBuffer+4, 3)) {
-        Comm().println(F("ACK CLC RST"));
+}
+
+
+/*
+ * Power management.
+ */
+void ReportPower(const char *cmd, UsbCurrentAvailable pwr) {
+  Comm().print(F("ACK "));
+  Comm().print(cmd);
+  switch (pwr) {
+    case UsbCurrentAvailable::kNone:
+      Comm().println(F(" ???A"));
+      break;
+    case UsbCurrentAvailable::k3A:
+      Comm().println(F(" 3.0A"));
+      break;
+    case UsbCurrentAvailable::k1_5A:
+      Comm().println(F(" 1.5A"));
+      break;
+    default:
+      Comm().println(F(" 0.5A"));
+  }
+}
+
+
+void SetPowerOverride(UsbCurrentAvailable c) {
+  PowerOverride = c;
+  preferences.putUInt(PowerOverridePrefsKey, (uint8_t)c);
+}
+
+
+void ResetPowerOverride() {
+  preferences.remove(PowerOverridePrefsKey);
+  PowerOverride = UsbCurrentAvailable::kNone;
+}
+
+
+void GetPowerOverride() {
+  PowerOverride = (UsbCurrentAvailable)preferences.getUInt(
+      PowerOverridePrefsKey, (uint8_t)UsbCurrentAvailable::kNone);
+}
+
+
+void PowerCommand(const char *wordv[], const int wordc) {
+  switch (wordc) {
+  case 2:
+    if (!strcmp("RST", wordv[1])) {
+      ResetPowerOverride();
+      Serial.print(F("ACK "));
+      Serial.print(wordv[0]);
+      Serial.println(F(" RST"));
+      return;
+    } else if (!strcmp("3.0A", wordv[1])) {
+      SetPowerOverride(UsbCurrentAvailable::k3A);
+    } else if (!strcmp("1.5A", wordv[1])) {
+      SetPowerOverride(UsbCurrentAvailable::k1_5A);
+    } else if (!strcmp("0.5A", wordv[1])) {
+      SetPowerOverride(UsbCurrentAvailable::kUsbStd);
+    } else {
+      ArgumentError(wordv[0]);
+      return;
+    }
+    // FALL THROUGH!
+  case 1:
+    ReportPower(wordv[0], PowerOverride == UsbCurrentAvailable::kNone ? currentAvailable : PowerOverride);
+    break;
+  default:
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+//TODO: I seem to have forgottent to implement this?
+void QueueCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+    Comm().print(F("NAK "));
+    Comm().print(wordv[0]);
+    Comm().println(F(" NOP"));
+  } else {
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Query free animation storage.
+ */
+void FreeCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+    Comm().print(F("ACK FRE "));
+    Comm().print(animator.GetNumFreeAnimationSlots());
+    Comm().print(F(" "));
+    Comm().println(animator.GetNumFreeFrameSlots());
+  } else {
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Skip to next animation in queue.
+ */
+void NextCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+    animator.SkipCurrentAnimation();
+    Comm().print(F("ACK "));
+    Comm().println(wordv[0]);
+  } else {
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Debug dump (not really part of the protocol).
+ */
+void DebugCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+      animator.DebugDumpln(Comm());
+  } else {
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Color Correction preference management.
+ */
+constexpr char ColorCorrectionPrefsKey[] = "ColorCorrection";
+void SetColorCorrectionPref(CRGB cc) {
+  preferences.putUInt(ColorCorrectionPrefsKey, (cc.red<<16)|(cc.green<<8)|cc.blue);
+}
+
+
+CRGB GetColorCorrectionPref() {
+  return CRGB(preferences.getUInt(ColorCorrectionPrefsKey, LEDColorCorrection::Typical8mmPixel));
+}
+
+
+void ResetColorCorrectionPref() {
+  preferences.remove(ColorCorrectionPrefsKey);
+}
+
+
+void ColorCorrectCommand(const char *wordv[], const int wordc) {
+  CRGB c;
+
+  switch (wordc) {
+  case 2:
+      if (!strcmp("RST", wordv[1])) {
         ResetColorCorrectionPref();
         FastLED.setCorrection(GetColorCorrectionPref());
       } else {
-        CRGB c;
-        if (!blink::util::ParseHex(c.raw, inputBuffer + 4, bufP)) {
-          Comm().println(F("NAK CLC ARG"));
+        if (!blink::util::ParseHex(c.raw, wordv[1])) {
+	  ArgumentError(wordv[0]);
           return;
         }
         SetColorCorrectionPref(c);
-        FastLED.setCorrection(c);
-        Comm().print(F("ACK CLC "));
-        Comm().print(c.red, HEX);
-        Comm().print(c.green, HEX);
-        Comm().println(c.blue, HEX);
       }
-      return;
-    }
-    if (!strncmp("DIM ", inputBuffer, 4)) {
-      uint32_t b;
-      if (!blink::util::ParseUInt32(&b, inputBuffer + 4, bufP) || b > 255) {
-        Comm().println(F("NAK DIM ARG"));
-        return;
-      }
-      FastLED.setBrightness(b);
-      Comm().print(F("ACK DIM "));
-      Comm().print(b);
-      return;
-    }
-    if (!strncmp("DTH ", inputBuffer, 4)) {
-      if (l == 6 && !strncmp("ON", inputBuffer + 4, 2)) {
-        FastLED.setDither(BINARY_DITHER);
-        Comm().println(F("ACK DTH ON"));
-        return;
-      }
-      if (l == 7 && !strncmp("OFF", inputBuffer + 4, 3)) {
-        FastLED.setDither(DISABLE_DITHER);
-        Comm().println(F("ACK DTH OFF"));
-        return;
-      }
-      Comm().println(F("NAK DTH ARG"));
-      return;
-    }
-    if (!strncmp("RGB ", inputBuffer, 4)) {
-      if (frame_being_loaded == nullptr) {
-        Comm().println(F("NAK RGB NFM"));
-        return;
-      }
-      if (frame_being_loaded->IsDone()) {
-        Comm().println(F("NAK RGB OFL"));
-        frame_being_loaded = nullptr;
-        return;
-      }
-
-      size_t row_being_loaded = frame_being_loaded->RowBeingLoaded();
-      if (l != BUFLEN || !frame_being_loaded->LoadPartFromAsciiHexBuffer(
-                             inputBuffer + 4, bufP)) {
-        Comm().println(F("NAK RGB ARG"));
-        return;
-      }
-      Comm().print(F("ACK RGB "));
-      Comm().println(row_being_loaded);
-      if (frame_being_loaded->IsDone()) {
-        frame_being_loaded = nullptr;
-      }
-      return;
-    }
-    if (!strncmp("FRM ", inputBuffer, 4)) {
-      uint32_t duration_milis;
-      if (!blink::util::ParseUInt32(&duration_milis, inputBuffer + 4, bufP)) {
-        Comm().println(F("NAK FRM ARG"));
-        return;
-      }
-      if (!animator.GetFrameToLoad(&frame_being_loaded)) {
-        Comm().println(F("NAK FRM UFL"));
-        return;
-      }
-      frame_being_loaded->SetDuration(duration_milis);
-      Comm().print(F("ACK FRM "));
-      Comm().println(duration_milis);
-      return;
-    }
-    if (!strncmp("ANM ", inputBuffer, 4)) {
-      uint32_t duration_milis;
-      if (!blink::util::ParseUInt32(&duration_milis, inputBuffer + 4, bufP)) {
-        Comm().println(F("NAK ANM ARG"));
-        return;
-      }
-      if (!animator.StartLoadingAnimation(duration_milis)) {
-        Comm().println(F("NAK ANM UFL"));
-        return;
-      }
-      Comm().print(F("ACK ANM "));
-      Comm().println(duration_milis);
-      return;
-    }
-    if (!strncmp("PWR ", inputBuffer, 4)) {
-      if (!strncmp("RST", inputBuffer + 4, 3)) {
-        ResetPowerOverride();
-      } else if (!strncmp("3.0A", inputBuffer + 4, 4)) {
-        SetPowerOverride(UsbCurrentAvailable::k3A);
-      } else if (!strncmp("1.5A", inputBuffer + 4, 4)) {
-        SetPowerOverride(UsbCurrentAvailable::k1_5A);
-      } else if (!strncmp("0.5A", inputBuffer + 4, 4)) {
-        SetPowerOverride(UsbCurrentAvailable::kUsbStd);
-      } else {
-        Comm().println(F("NAK PWR ARG"));
-        return;
-      }
-      Comm().print(F("ACK "));
-      ReportPower(PowerOverride);
-      return;
-    }
-    if (l == 7 && !strncmp("ROT ", inputBuffer, 4)) {
-      MatrixRotation rotation;
-      if (!strncmp("000", inputBuffer + 4, 3)) {
-        rotation = MatrixRotation::k000;
-      } else if (!strncmp("090", inputBuffer + 4, 3)) {
-        rotation = MatrixRotation::k090;
-      } else if (!strncmp("180", inputBuffer + 4, 3)) {
-        rotation = MatrixRotation::k180;
-      } else if (!strncmp("270", inputBuffer + 4, 3)) {
-        rotation = MatrixRotation::k270;
-      } else {
-        Comm().println(F("NAK ROT ARG"));
-        return;
-      }
-      preferences.putUInt(MatrixRotationPrefsKey, (uint8_t)rotation);
-      display.setRotation(rotation);
-      inputBuffer[7] = '\0';
-      Comm().print(F("ACK ROT "));
-      Comm().println(inputBuffer + 4);
-      return;
-    }
+  case 1:
+    c = GetColorCorrectionPref();
+    FastLED.setCorrection(c);
+    Comm().print(F("ACK "));
+    Comm().print(wordv[0]);
+    Comm().print(F(" "));
+    Comm().print(c.red, HEX);
+    Comm().print(c.green, HEX);
+    Comm().println(c.blue, HEX);
+    break;
+  default:
+    ArgumentError(wordv[0]);
   }
-  if (l == 3) {
-    if (!strncmp("VER", inputBuffer, 3)) {
-      Comm().println(F("ACK VER 1.0"));
-      return;
-    }
-    if (!strncmp("PWR", inputBuffer, 3)) {
-      Comm().print(F("ACK "));
-      ReportPower(currentAvailable);
-      return;
-    }
-    if (!strncmp("QUE", inputBuffer, 3)) {
-      Comm().println(F("ACK QUE NOP"));
-      return;
-    }
-    if (!strncmp("FRE", inputBuffer, 3)) {
-      Comm().print(F("ACK FRE "));
-      Comm().print(animator.GetNumFreeAnimationSlots());
-      Comm().print(F(" "));
-      Comm().println(animator.GetNumFreeFrameSlots());
-      Comm().println();
-      return;
-    }
-    if (!strncmp("DON", inputBuffer, 3)) {
-      if (!animator.IsLoadingAnimation()) {
-        Comm().println(F("NAK DON NOA"));
-        return;
-      }
-      animator.FinalizeLoadingAnimation();
-      Comm().println(F("ACK DON ANM"));
-      return;
-    }
-    if (!strncmp("RST", inputBuffer, 3)) {
-      animator.Reset();
-      frame_being_loaded = nullptr;
-      display.clear();
-      Comm().println(F("ACK RST"));
-      return;
-    }
-    if (!strncmp("NXT", inputBuffer, 3)) {
-      animator.SkipCurrentAnimation();
-      Comm().println(F("ACK NXT"));
-      return;
-    }
-    if (!strncmp("DBG", inputBuffer, 3)) {
-      animator.DebugDumpln(Comm());
-      return;
-    }
-  }
-  Comm().println(F("NAK CMD"));
 }
+
+
+/*
+ * Brightness preference management.
+ */
+// TODO: this should be stored in preferences.
+void BrightnessCommand(const char *wordv[], const int wordc) {
+  uint32_t b;
+
+  switch (wordc) {
+  case 2:
+    if (!blink::util::ParseUInt32(&b, wordv[1]) || b > 255) {
+      ArgumentError(wordv[0]);
+      return;
+    }
+    FastLED.setBrightness(b);
+  case 1:
+    b = FastLED.getBrightness();
+    Comm().print(F("ACK "));
+    Comm().print(wordv[0]);
+    Comm().print(F(" "));
+    Comm().println(b);
+    break;
+  default:
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Color dithering preference management.
+ */
+// TODO: this should be stored in preferences.
+void DitherCommand(const char *wordv[], const int wordc) {
+  switch (wordc) {
+  case 2:
+      if (!strcmp("ON", wordv[1])) {
+        FastLED.setDither(BINARY_DITHER);
+      } else if (!strcmp("OFF", wordv[1])) {
+        FastLED.setDither(DISABLE_DITHER);
+      } else {
+	ArgumentError(wordv[0]);
+	return;
+      }
+      Comm().print(F("ACK "));
+      Comm().print(wordv[0]);
+      Comm().print(F(" "));
+      Comm().println(wordv[1]);
+      break;
+  case 1:
+  default:
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Rotation preference management.
+ */
+constexpr char MatrixRotationPrefsKey[] = "MatrixRotation";
+
+
+MatrixRotation GetRotationPref() {
+  return (MatrixRotation)preferences.getUInt(MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000);
+}
+
+
+void SetRotationPref(MatrixRotation rot) {
+  preferences.putUInt(MatrixRotationPrefsKey, (uint8_t)rot);
+}
+
+
+void ReportRotation(const char *cmd, MatrixRotation rot) {
+  Comm().print(F("ACK "));
+  Comm().print(cmd);
+  switch (rot) {
+    case MatrixRotation::k000:
+      Comm().println(F(" 000"));
+      break;
+    case MatrixRotation::k090:
+      Comm().println(F(" 090"));
+      break;
+    case MatrixRotation::k180:
+      Comm().println(F(" 180"));
+      break;
+    case MatrixRotation::k270:
+      Comm().println(F(" 270"));
+      break;
+  }
+}
+
+
+void RotateCommand(const char *wordv[], const int wordc) {
+  MatrixRotation rotation;
+  switch (wordc) {
+  case 2:
+    if (!strcmp("000", wordv[1])) {
+      rotation = MatrixRotation::k000;
+    } else if (!strcmp("090", wordv[1])) {
+      rotation = MatrixRotation::k090;
+    } else if (!strcmp("180", wordv[1])) {
+      rotation = MatrixRotation::k180;
+    } else if (!strcmp("270", wordv[1])) {
+      rotation = MatrixRotation::k270;
+    } else {
+      ArgumentError(wordv[0]);
+      return;
+    }
+    SetRotationPref(rotation);
+  case 1:
+    rotation = GetRotationPref();
+    display.setRotation(rotation);
+    ReportRotation(wordv[0], rotation);
+    break;
+  default:
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+blink::animation::Frame<kLedMatrixNumCols, kLedMatrixNumLines> *FrameBeingLoaded = nullptr;
+
+/*
+ * Get an RGB line
+ */
+void RgbCommand(const char *wordv[], const int wordc) {
+  if (FrameBeingLoaded == nullptr) {
+    ReportError(wordv[0], "NFM");
+    return;
+  }
+  if (FrameBeingLoaded->IsDone()) {
+    ReportError(wordv[0], "OFL");
+    FrameBeingLoaded = nullptr;
+    return;
+  }
+  size_t row_being_loaded = FrameBeingLoaded->RowBeingLoaded();
+  if (!FrameBeingLoaded->LoadPartFromAsciiHexBuffer(wordv[1])) {
+    ArgumentError(wordv[0]);
+    return;
+  }
+  Comm().print(F("ACK "));
+  Comm().print(wordv[0]);
+  Comm().print(F(" "));
+  Comm().println(row_being_loaded);
+  if (FrameBeingLoaded->IsDone()) {
+    FrameBeingLoaded = nullptr;
+  }
+}
+
+
+/*
+ * Start loading a frame
+ */
+void FrameCommand(const char *wordv[], const int wordc) {
+  uint32_t duration_milis;
+
+  if (!blink::util::ParseUInt32(&duration_milis, wordv[1])) {
+    ArgumentError(wordv[0]);
+    return;
+  }
+  if (!animator.GetFrameToLoad(&FrameBeingLoaded)) {
+    ReportError(wordv[0], "UFL");
+    return;
+  }
+  FrameBeingLoaded->SetDuration(duration_milis);
+  Comm().print(F("ACK "));
+  Comm().print(wordv[0]);
+  Comm().print(" ");
+  Comm().println(duration_milis);
+  return;
+}
+
+
+/*
+ * Start loading an animation
+ */
+void AnimationCommand(const char *wordv[], const int wordc) {
+  uint32_t duration_milis;
+
+  if (!blink::util::ParseUInt32(&duration_milis, wordv[1])) {
+    ArgumentError(wordv[0]);
+    return;
+  }
+  if (!animator.StartLoadingAnimation(duration_milis)) {
+    ReportError(wordv[0], "UFL");
+    return;
+  }
+  Comm().print(F("ACK "));
+  Comm().print(wordv[0]);
+  Comm().print(" ");
+  Comm().println(duration_milis);
+  return;
+}
+
+
+/*
+ * Reset animation machinery and display.
+ */
+void ResetCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+    animator.Reset();
+    FrameBeingLoaded = nullptr;
+    display.clear();
+    Comm().print(F("ACK "));
+    Comm().println(wordv[0]);
+  } else {
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Close animation upload.
+ */
+void DoneCommand(const char *wordv[], const int wordc) {
+  if (wordc == 1) {
+    if (!animator.IsLoadingAnimation()) {
+      Comm().println(F("NAK DON NOA"));
+      return;
+    }
+    animator.FinalizeLoadingAnimation();
+    Comm().print(F("ACK "));
+    Comm().print(wordv[0]);
+    Comm().println(F(" ANM"));
+  } else {
+    ArgumentError(wordv[0]);
+  }
+}
+
+
+/*
+ * Command dispatching.
+ */
+DispatchEntry DispatchTable[] = {
+    {"ANM", AnimationCommand},
+    {"CLC", ColorCorrectCommand},
+    {"DBG", DebugCommand},
+    {"DIM", BrightnessCommand},
+    {"DON", DoneCommand},
+    {"DTH", DitherCommand},
+    {"FRE", FreeCommand},
+    {"FRM", FrameCommand},
+    {"NXT", NextCommand},
+    {"PWR", PowerCommand},
+    {"QUE", QueueCommand},
+    {"RGB", RgbCommand},
+    {"ROT", RotateCommand},
+    {"RST", ResetCommand},
+    {"VER", VersionCommand}  
+};
+
+constexpr int NumCommands = sizeof(DispatchTable)/sizeof(DispatchTable[0]);
+
+const DispatchEntry *getDispatch(const char *cmd, const DispatchEntry commands[], const int numCommands) {
+  int lo = 0;
+  int hi = numCommands;
+
+  if (strlen(cmd) != 3) return NULL;
+  while (hi > lo) {
+    int mid = (hi+lo)/2;
+    int cmp = strcmp(cmd, commands[mid].command);
+    if (cmp < 0) {
+      hi = mid;
+    } else if (cmp > 0) {
+      lo = mid+1;
+    } else {
+      return &commands[mid];
+    }
+  }
+  return NULL;
+}
+
+void ProcessCommand(const char *wordv[], const int wordc) {
+  const DispatchEntry *dispatch = getDispatch(wordv[0], DispatchTable, NumCommands);
+
+  if (dispatch == NULL) {
+    Comm().println(F("NAK CMD"));
+    return;
+  }
+  dispatch->implementation(wordv, wordc);
+}
+  
+  
+char inputBuffer[COMMAND_MAXLEN+1]; // Make space for string terminator
+char *endOfBuffer;
+bool lineTooLong;
 
 void SerialInit() {
   Serial.begin(BaudRate);
   Serial.setRxBufferSize(
       SerialRxBufferSize);  // Enough to hold 30ms worth of serial data.
   Serial.println(F("Startup!"));
-  bufP = inputBuffer;
+  endOfBuffer = inputBuffer;
   lineTooLong = false;
 }
 
@@ -751,13 +996,34 @@ void CommsUpdate() {
   while (Comm().available()) {
     int c = Comm().read();
     if (c == '\n') {
-      if (bufP != inputBuffer) {
-        ProcessCommand();
+      if (endOfBuffer != inputBuffer) {
+        char *wordv[COMMAND_MAXWORDS];
+        int wordc = 0;
+        char *p = inputBuffer;
+
+        *endOfBuffer = '\0';
+        if (lineTooLong)
+          Comm().println(F("NAK LTL"));
+
+        for (p = inputBuffer; *p && wordc <= COMMAND_MAXWORDS;) {
+          while (*p && isspace(*p)) p++;
+          if (*p) {
+            wordv[wordc++] = p;
+            while (*p && !isspace(*p)) p++;
+            if (*p) *(p++) = '\0';
+          }
+        }
+
+        if (*p) {
+          Comm().println(F("NAK LIN"));
+        } else {
+          ProcessCommand((const char **)wordv, wordc);
+        }
       }
-      bufP = inputBuffer;
+      endOfBuffer = inputBuffer;
       lineTooLong = false;
-    } else if (bufP - inputBuffer < sizeof(inputBuffer)) {
-      *bufP++ = c;
+    } else if (endOfBuffer - inputBuffer < COMMAND_MAXLEN) {
+      *endOfBuffer++ = c;
     } else {
       lineTooLong = true;
     }
@@ -801,8 +1067,7 @@ void setup() {
   GetPowerOverride();
   FastLED.setCorrection(GetColorCorrectionPref());
   display.clear();
-  display.setRotation((MatrixRotation)preferences.getUInt(
-      MatrixRotationPrefsKey, (uint8_t)MatrixRotation::k000));
+  display.setRotation(GetRotationPref());
   SerialInit();
 }
 
